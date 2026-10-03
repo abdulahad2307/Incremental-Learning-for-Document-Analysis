@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import numpy as np
@@ -87,7 +88,7 @@ def train_one_epoch_cil_v2(
         all_preds.extend(preds.detach().cpu().tolist())
         all_labels.extend(labels.detach().cpu().tolist())
 
-        metrics.update(np.array(all_preds), np.array(all_labels))
+        metrics.update(preds.detach().cpu().numpy(), labels.detach().cpu().numpy())  # this batch only
         total_loss += loss.item() * accum_steps
 
         del outputs, logits, loss, inputs, labels

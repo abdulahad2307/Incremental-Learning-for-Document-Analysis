@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from utils.training_scope import set_training_scope
 from typing import List, Dict, Optional
 
 class TrainingMode:
@@ -26,7 +27,7 @@ class FullModelTraining(TrainingMode):
         return self.model.parameters()
 
 class LastLayerTraining(TrainingMode):
-    """Train only the classifier layers"""
+    """Train only the classifier layers (training_mode classifier_only)"""
     def prepare_for_training(self):
         # Freeze all parameters
         for param in self.model.parameters():
@@ -71,12 +72,27 @@ class SelectiveLayerTraining(TrainingMode):
     def get_trainable_params(self):
         return filter(lambda p: p.requires_grad, self.model.parameters())
 
+class ScopeTraining(TrainingMode):
+    """Train the parameters selected by utils.training_scope (e.g. last feature layer + classifier heads)"""
+    def __init__(self, model: nn.Module, scope: str):
+        super().__init__(model)
+        self.scope = scope
+
+    def prepare_for_training(self):
+        return set_training_scope(self.model, self.scope)
+
+    def get_trainable_params(self):
+        return filter(lambda p: p.requires_grad, self.model.parameters())
+
 def get_training_mode(model: nn.Module, mode: str, trainable_layers: Optional[List[str]] = None):
-    """Factory function to get the appropriate training mode"""
-    if mode == "full":
+    """Factory function to get the appropriate training mode.
+    classifier_only: heads only; last_layer: last feature layer (fusion_module) + heads; full / full_model: everything"""
+    if mode in ("full", "full_model"):
         return FullModelTraining(model)
-    elif mode == "last_layer":
+    elif mode == "classifier_only":
         return LastLayerTraining(model)
+    elif mode == "last_layer":
+        return ScopeTraining(model, "last_layer")
     elif mode == "selective":
         if trainable_layers is None:
             raise ValueError("trainable_layers must be provided for selective training mode")

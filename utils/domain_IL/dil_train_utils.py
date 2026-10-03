@@ -1,6 +1,7 @@
 import os
 import glob
 import torch
+from utils.domain_IL.dil_utils import mix_replay
 from torch import nn
 import numpy as np
 from tqdm import tqdm
@@ -93,20 +94,9 @@ def train_one_epoch_dil(
     pbar = tqdm(total=total_batches, desc="Training", unit="batch")
     for domain, loader in train_loaders.items():
         for batch in loader:
-            inputs = batch["images"].to(device)
-            labels = batch["labels"].to(device)
-            text_inputs = batch.get("texts", None)
-            if text_inputs is not None:
-                text_inputs = {k: v.to(device) for k, v in text_inputs.items()}
-
-            if exemplar_manager is not None:
-                exemplar_batch = exemplar_manager.get_replay_batch(device)
-                if exemplar_batch is not None:
-                    inputs = torch.cat([inputs, exemplar_batch["images"]], dim=0)
-                    labels = torch.cat([labels, exemplar_batch["labels"]], dim=0)
-                    if text_inputs is not None and "texts" in exemplar_batch:
-                        for k in text_inputs:
-                            text_inputs[k] = torch.cat([text_inputs[k], exemplar_batch["texts"][k]])
+            # Current-domain batch plus replayed exemplars of the pretrained domain (if a replay memory is used)
+            inputs, labels, text_inputs = mix_replay(exemplar_manager, batch["images"], batch["labels"],
+                                                     batch.get("texts", None), device)
 
             batch_data = {"images": inputs, "labels": labels}
             if text_inputs is not None:

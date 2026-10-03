@@ -1,62 +1,41 @@
 import numpy as np
-import torch
-from sklearn.metrics import pairwise_distances
-from scipy.stats import weibull_min
-import gc
+from scipy.optimize import minimize
+
 from utils.evm.evm_classifier import EVMClassifier
 
+
 class RegularizedEVMClassifier(EVMClassifier):
+    """RegEVM: EVM whose per-extreme-vector Weibull fit is regularised on the scale (Eq. 10):
+
+        (kappa_i, lambda_i) = argmin  - sum_j log f_Weibull(d_j; kappa, lambda) + alpha * lambda^2
+
+    over the tail of half-distances d_j of extreme vector i. alpha = lambda_reg. Large scales (overly permissive class
+    tails) are penalised; alpha = 0 gives the standard maximum-likelihood EVM fit. The penalty is in the units of the
+    feature distances, so alpha has to be chosen relative to the feature scale.
+    Used by fit() and fit_cuda() (the fitting hook of EVMClassifier).
+    """
+
     def __init__(self, lambda_reg=0.1, **kwargs):
         super().__init__(**kwargs)
-        self.lambda_reg = lambda_reg  # Regularization strength
+        self.lambda_reg = lambda_reg  # alpha in Eq. 10
 
-    def fit(self, features: dict):
-        classes = list(features.keys())
-        for class_name, class_features in features.items():
-            arr = np.asarray(class_features, dtype=np.float32)
-            self.class_features[class_name] = arr
-            self.class_means[class_name] = np.mean(arr, axis=0)
+    def _fit_weibull(self, tail):
+        scale0, shape0 = super()._fit_weibull(tail)
+        if self.lambda_reg <= 0:
+            return scale0, shape0
+        d = np.maximum(np.asarray(tail, dtype=np.float64), 1e-12)
+        log_d = np.log(d)
+        n = len(d)
 
-        for target_class in classes:
-            target_features = self._prune_features(self.class_features[target_class])
-            if len(classes) > 1:
-                negatives = [self._prune_features(self.class_features[c]) for c in classes if c != target_class]
-                negative_features = np.vstack(negatives)
-            else:
-                negative_features = target_features
+        def objective(theta):  # theta = (log shape, log scale) keeps both positive
+            k, lam = np.exp(theta)
+            z = np.exp(np.clip(k * (log_d - np.log(lam)), -700, 700))  # (d/lam)^k
+            nll = -(n * np.log(k) - n * k * np.log(lam) + (k - 1) * log_d.sum() - z.sum())
+            return nll + self.lambda_reg * lam ** 2
 
-            negative_features = negative_features.astype(np.float32, copy=False)
-            weibull_models = []
-
-            for start in range(0, target_features.shape[0], self.batch_size):
-                end = min(start + self.batch_size, target_features.shape[0])
-                batch_feats = target_features[start:end]
-
-                dists = pairwise_distances(batch_feats, negative_features, metric=self.distance_metric)
-
-                for i in range(dists.shape[0]):
-                    point_distances = np.sort(dists[i])
-                    t = (max(int(len(point_distances) * self.tailsize), 1)
-                         if isinstance(self.tailsize, float) and self.tailsize < 1.0
-                         else min(int(self.tailsize), len(point_distances)))
-                    tailsize_distances = point_distances[:t]
-                    try:
-                        # Fit Weibull without location parameter for stability
-                        shape, loc, scale = weibull_min.fit(tailsize_distances, floc=0)
-
-                        # Regularize scale parameter (L2 penalty)
-                        scale_reg = scale + self.lambda_reg * scale
-
-                        weibull_models.append((batch_feats[i], scale_reg, shape))
-                    except Exception:
-                        weibull_models.append((batch_feats[i],
-                                               np.mean(tailsize_distances),
-                                               1.0))
-                del dists
-                gc.collect()
-
-            self.weibull_models[target_class] = weibull_models
-
-        self.initialized = True
-        gc.collect()
-        return self
+        theta0 = np.log([max(shape0, 1e-6), max(scale0, 1e-12)])
+        res = minimize(objective, theta0, method="L-BFGS-B")
+        if not res.success or not np.all(np.isfinite(res.x)):
+            return scale0, shape0
+        shape, scale = np.exp(res.x)
+        return float(scale), float(shape)

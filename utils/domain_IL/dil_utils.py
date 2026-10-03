@@ -109,13 +109,14 @@ class DistillationDomainIL(DomainIncrementalStrategy):
         images = batch["images"].to(self.device)
         labels = batch["labels"].to(self.device)
 
+        texts = None
         if "texts" in batch and batch["texts"] is not None:
             texts = {k: v.to(self.device) for k, v in batch["texts"].items()}
-            logits = model(images, texts)
-            old_logits = old_model(images, texts) if old_model else None
-        else:
-            logits = model(images)
-            old_logits = old_model(images) if old_model else None
+        logits = model(images, texts) if texts is not None else model(images)
+        old_logits = None
+        if old_model:
+            with torch.no_grad():  # frozen teacher
+                old_logits = old_model(images, texts) if texts is not None else old_model(images)
 
         cls_loss = criterion(logits, labels)
         dist_loss = 0.0
@@ -216,84 +217,72 @@ class ExemplarManager:
         if len(all_samples) == 0:
             return None
         samples = random.sample(all_samples, min(batch_size, len(all_samples)))
-
-        images = torch.stack([s["images"] for s in samples]).to(device)
-        labels = torch.tensor([s["labels"] for s in samples], device=device)
-
-        if "texts" in samples[0]:
-            texts_keys = samples[0]["texts"].keys()
-            texts = {k: torch.stack([s["texts"][k] for s in samples]).to(device) for k in texts_keys}
-        else:
-            texts = None
-
+        # Exemplars are dataset items: {"image", "text", "label"}
+        images = torch.stack([s["image"] for s in samples]).to(device)
+        labels = torch.tensor([int(s["label"]) for s in samples], device=device)
         batch = {"images": images, "labels": labels}
-        if texts is not None:
-            batch["texts"] = texts
+        if samples[0].get("text") is not None:
+            batch["texts"] = {k: torch.stack([s["text"][k] for s in samples]).to(device) for k in samples[0]["text"]}
         return batch
 
-    def update_exemplars(self, model, dataset, device):
+    def update_exemplars(self, model, dataset, device, max_candidates=1000, seed=0):
+        """Select up to max_per_class exemplars per class of `dataset` (e.g. the pretrained domain's train set).
+        Herding runs on a random pool of at most `max_candidates` samples per class."""
+        base, idx_map = (dataset.dataset, list(dataset.indices)) if isinstance(dataset, torch.utils.data.Subset) \
+            else (dataset, list(range(len(dataset))))
+        rng = random.Random(seed)
+        # Group by the global label the dataset returns (folder index -> class name -> class_to_idx)
+        def global_label(folder_idx):
+            name = base.classes[folder_idx].replace(' ', '_')
+            return base.class_to_idx.get(name, folder_idx) if hasattr(base, "class_to_idx") else folder_idx
+        by_class = {}
+        for i, j in enumerate(idx_map):
+            by_class.setdefault(global_label(int(base.samples[j][1])), []).append(i)
+
         model.eval()
-        features_per_class = {}
-        samples_per_class = {}
-
-        # Extract features per sample
-        with torch.no_grad():
-            for idx in range(len(dataset)):
-                sample = dataset[idx]
-                label = sample["label"] if isinstance(sample["label"], int) else sample["label"].item()
-                img = sample["image"].unsqueeze(0).to(device)
-                txt = sample.get("text")
-                if txt is not None:
-                    txt = {k: v.unsqueeze(0).to(device) for k, v in txt.items()}
-                    feat = model.extract_features(img, txt)
-                else:
-                    feat = model.extract_features(img)
-                feat = feat.cpu().squeeze(0)
-
-                features_per_class.setdefault(label, []).append(feat)
-                samples_per_class.setdefault(label, []).append(sample)
-
-        # Select exemplars per class according to strategy
-        for cls in features_per_class:
-            feats = torch.stack(features_per_class[cls])  # (N_samples, feature_dim)
-            samples = samples_per_class[cls]
-            K = min(self.max_per_class, len(samples))
-
+        for cls, indices in by_class.items():
+            K = min(self.max_per_class, len(indices))
             if self.selection_strategy == "random":
-                selected_indices = random.sample(range(len(samples)), K)
-
-            elif self.selection_strategy == "herding":
-                # Herding: Select exemplars that best approximate class mean in feature space
+                selected = rng.sample(indices, K)
+            else:  # herding: greedily match the class mean in feature space
+                pool = indices if len(indices) <= max_candidates else rng.sample(indices, max_candidates)
+                feats = []
+                with torch.no_grad():
+                    for i in pool:
+                        sample = dataset[i]
+                        img = sample["image"].unsqueeze(0).to(device)
+                        txt = sample.get("text")
+                        txt = {k: v.unsqueeze(0).to(device) for k, v in txt.items()} if txt is not None else None
+                        feats.append((model.extract_features(img, txt) if txt is not None else model.extract_features(img)).cpu().squeeze(0))
+                feats = torch.stack(feats)
                 class_mean = feats.mean(dim=0)
-                selected_indices = []
-                selected_features = torch.zeros_like(class_mean).unsqueeze(0)  # cumulative sum
-
-                # Greedy selection to minimize distance to class_mean
-                candidates = set(range(len(samples)))
+                chosen, running = [], torch.zeros_like(class_mean)
+                remaining = list(range(len(pool)))
                 for _ in range(K):
-                    if not candidates:
-                        break
-                    distances = []
-                    for idx in candidates:
-                        temp_sum = selected_features.sum(dim=0) + feats[idx]
-                        mean_feat = temp_sum / (len(selected_indices) + 1)
-                        dist = torch.norm(class_mean - mean_feat).item()
-                        distances.append((dist, idx))
-                    distances.sort()
-                    best_idx = distances[0][1]
-                    selected_indices.append(best_idx)
-                    selected_features = torch.cat([selected_features, feats[best_idx].unsqueeze(0)], dim=0)
-                    candidates.remove(best_idx)
-
-            else:
-                raise ValueError(f"Unknown selection strategy: {self.selection_strategy}")
-
-            # Add selected exemplars to manager for this class
-            selected_samples = [samples[i] for i in selected_indices]
-            self.exemplars[cls] = selected_samples
-
+                    dists = torch.norm(class_mean - (running + feats[remaining]) / (len(chosen) + 1), dim=1)
+                    best = remaining.pop(int(torch.argmin(dists)))
+                    chosen.append(best)
+                    running = running + feats[best]
+                selected = [pool[c] for c in chosen]
+            self.exemplars[cls] = [dataset[i] for i in selected]
+        self._balance()
         model.train()
+        print(f"Replay memory: {sum(len(v) for v in self.exemplars.values())} exemplars of {len(self.exemplars)} classes "
+              f"({self.selection_strategy})")
 
+
+def mix_replay(exemplar_manager, images, labels, texts, device, batch_size=32):
+    """Append a replay batch of exemplars (old domain) to the current batch. Returns images, labels, texts on device."""
+    images, labels = images.to(device), labels.to(device)
+    texts = {k: v.to(device) for k, v in texts.items()} if texts is not None else None
+    replay = exemplar_manager.get_replay_batch(device, batch_size) if exemplar_manager is not None else None
+    if replay is None:
+        return images, labels, texts
+    images = torch.cat([images, replay["images"]], dim=0)
+    labels = torch.cat([labels, replay["labels"]], dim=0)
+    if texts is not None and "texts" in replay:
+        texts = {k: torch.cat([texts[k], replay["texts"][k]], dim=0) for k in texts}
+    return images, labels, texts
 
 
 # ----------- Adaptive Learning Rate -----------

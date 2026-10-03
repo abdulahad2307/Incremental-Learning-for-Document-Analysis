@@ -1,0 +1,41 @@
+export PYTHONPATH=$PYTHONPATH:$(pwd)/FAU-Masters_Thesis-Ahad
+
+# Test with just 3 classes in incremental steps
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export CUDA_LAUNCH_BLOCKING=1
+
+echo "Starting Enhanced Class Incremental Learning..."
+
+python src/class_incremental.py \
+  --data_dir /home/woody/iwi5/iwi5280h/dataset/small_dataset \
+  --text_json_path /home/woody/iwi5/iwi5280h/dataset/small_dataset_ocr_texts_trocr.json \
+  --checkpoint_dir checkpoints/enhanced_cil_trocr \
+  --model_name "eaml" \
+  --class_order "letter,form,email,handwritten,advertisement,scientific_report,invoice,presentation,questionnaire,resume,memo,scientific publication,specification,file folder,news article,budget" \
+  --start_step 11 \
+  --batch_size 4 \
+  --lr 1e-4 \
+  --num_epochs 300 \
+  --strategy "distillation" \
+  --temperature 2.0 \
+  --lambda_distill 1.0 \
+  --lambda_ewc 5000.0 \
+  --use_ewc \
+  --use_exemplars \
+  --max_exemplars 200 \
+  --exemplar_selection "herding" \
+  --training_mode "last_layer" \
+  --base_model_path /home/hpc/iwi5/iwi5280h/projects/FAU-Masters_Thesis-Ahad/outputs/small_eaml_trocr_20250623_013315/eaml_best_model.pt\
+  --full_model_acc 0.3175
+
+
+echo "Enhanced Class Incremental Learning Completed."
+
+
+
+
+
+import json
+with open('/home/woody/iwi5/iwi5280h/dataset/small_dataset_ocr_texts_trocr.json') as f:
+  ocr_data = json.load(f)
+print(list(ocr_data.keys())[:10])

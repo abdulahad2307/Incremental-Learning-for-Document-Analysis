@@ -1,6 +1,7 @@
+import re
 import torch
-#from utils.eaml.eaml_model import EAMLModel  
-from eaml.eaml_model import EAMLModel  
+from utils.training_scope import set_training_scope
+from utils.eaml.eaml_model import EAMLModel
 
 
 def load_eaml_model(checkpoint_path, num_classes, device, text_branch=True):
@@ -35,37 +36,19 @@ def load_eaml_model_partial(
     return model
 
 def set_finetune_mode(model, mode="head_only", encoder_unfreeze_depth=0):
-    # Freeze all weights initially
-    for param in model.parameters():
-        param.requires_grad = False
-    
-    if mode == "head_only":
-        # Unfreeze classifier heads only
-        for head_name in ["classifier", "image_classifier", "text_classifier", "fusion_classifier"]:
-            if hasattr(model, head_name):
-                for param in getattr(model, head_name).parameters():
-                    param.requires_grad = True
-    
-    elif mode == "partial":
-        # Unfreeze encoder layers from a specified depth + classifiers
+    """head_only: classifier heads; last_layer: fusion_module + heads; partial / partial_finetune: encoder layers with
+    index >= encoder_unfreeze_depth + fusion_module + heads; full / full_finetune: everything."""
+    mode = {"partial_finetune": "partial", "full_finetune": "full"}.get(mode, mode)
+    if mode in ("head_only", "last_layer", "full"):
+        return set_training_scope(model, mode)
+    if mode == "partial":
+        set_training_scope(model, "last_layer")
         for name, param in model.named_parameters():
-            if "layer" in name:
-                layer_idx = int(name.split("layer")[1].split(".")[0])
-                if layer_idx >= encoder_unfreeze_depth:
-                    param.requires_grad = True
-            for head_name in ["classifier", "image_classifier", "text_classifier", "fusion_classifier"]:
-                if head_name in name:
-                    param.requires_grad = True
-    
-    elif mode == "full":
-        # Unfreeze all
-        for param in model.parameters():
-            param.requires_grad = True
-    
-    else:
-        raise ValueError(f"Unknown finetune mode: {mode}")
-    
-    return model
+            m = re.search(r"layer\.?(\d+)", name)  # e.g. text_encoder...encoder.layer.11..., image_encoder...layer4...
+            if m and int(m.group(1)) >= encoder_unfreeze_depth:
+                param.requires_grad = True
+        return model
+    raise ValueError(f"Unknown finetune mode: {mode}")
 
 
 def load_partial_checkpoint(

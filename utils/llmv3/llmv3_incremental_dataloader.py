@@ -26,18 +26,24 @@ class IncrementalOCRTensorsDataset(Dataset):
         images_per_class: int = None,
         seed: int = 42,
         dataset_name: str = "rvl_cdip",  # or "tobacco3482"
+        split: str = "train",
+        label_classes: list = None,
     ):
         self.image_dir = Path(image_dir)
         self.ocr_tensor_dir = Path(ocr_tensor_file)  # directory containing .pt files
         self.included_classes = included_classes
-        self.class2idx = {c: i for i, c in enumerate(included_classes)}
+        # Labels index into label_classes (the model's full label space), not into the loaded subset
+        self.label_classes = label_classes if label_classes is not None else included_classes
+        missing = [c for c in included_classes if c not in self.label_classes]
+        if missing:
+            raise ValueError(f"Classes {missing} are not in label_classes {self.label_classes}")
+        self.class2idx = {c: i for i, c in enumerate(self.label_classes)}
         self.max_length = max_length
         self.bbox_style = bbox_style
+        # Same preprocessing as the base model (utils/llmv3/llmv3_data_loader.py): images in [0, 1]
         self.transform = T.Compose([
             T.Resize((224, 224)),
             T.ToTensor(),
-            T.Normalize(mean=[0.485, 0.456, 0.406],
-                        std=[0.229, 0.224, 0.225]),
         ])
         self.dataset_name = dataset_name
 
@@ -48,7 +54,7 @@ class IncrementalOCRTensorsDataset(Dataset):
         for class_name in included_classes:
             # Dataset folder structure per dataset
             if dataset_name == "rvl_cdip":
-                class_dir = self.image_dir / "train" / class_name
+                class_dir = self.image_dir / split / class_name
             elif dataset_name == "tobacco3482":
                 class_dir = self.image_dir / class_name
             else:
@@ -62,6 +68,11 @@ class IncrementalOCRTensorsDataset(Dataset):
             #images = list(class_dir.glob("*.*"))
             valid_extensions = ['.jpg', '.jpeg', '.png', '.tiff','.tif', '.bmp']
             images = [img for img in class_dir.iterdir() if img.suffix.lower() in valid_extensions]
+            # Skip images without an OCR file (unreadable images get none), as the base-model loader does
+            no_ocr = [img for img in images if not (self.ocr_tensor_dir / (img.stem + ".pt")).exists()]
+            if no_ocr:
+                print(f"Skipping {len(no_ocr)} image(s) in {class_dir} without OCR file, e.g. {no_ocr[0].name}")
+                images = [img for img in images if img not in set(no_ocr)]
             if images_per_class:
                 images = random.sample(images, min(images_per_class, len(images)))
             else:
@@ -99,7 +110,7 @@ class IncrementalOCRTensorsDataset(Dataset):
             ocr_dict = torch.load(str(ocr_tensor_path))
 
         input_ids = ocr_dict["input_ids"]
-        input_ids = input_ids.clamp(min=0, max=self.max_length - 1)
+        input_ids = input_ids.clamp(min=0)  # token ids must not be clamped to seq length
         attention_mask = ocr_dict["attention_mask"]
 
         if self.bbox_style == "rect":
@@ -163,6 +174,7 @@ def get_incremental_dataloader(
     bbox_style: str = "rect",
     images_per_class: int = None,
     seed: int = 42,
+    label_classes: list = None,
 ):
     base_path = Path(image_dir)
     split_path = base_path / split
@@ -189,6 +201,8 @@ def get_incremental_dataloader(
         images_per_class=None if use_internal_split else images_per_class,
         seed=seed,
         dataset_name=dataset_name,
+        split=split if not use_internal_split else "train",
+        label_classes=label_classes,
     )
 
     if use_internal_split:

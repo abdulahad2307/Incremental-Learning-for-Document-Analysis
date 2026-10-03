@@ -4,6 +4,8 @@
 ## Descripton: 
 Developing an incremental learning system to classify various document types from scanned images of documents. The model should adapt to new document types as they emerge.
 
+**How to run:** repository layout, environments and the full pipeline are in [RUN_README.md](RUN_README.md).
+
 ### Data:
 RVL-CDIP : aharley/rvl_cdip · Datasets at Hugging Face
 PubLayNet - IBM Developer

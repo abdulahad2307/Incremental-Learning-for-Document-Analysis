@@ -1,3 +1,5 @@
+import os
+import random
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -154,9 +156,6 @@ class DistillationIncremental(IncrementalStrategy):
             else:
                 loss = cls_loss
 
-                print(f"Classification loss: {cls_loss.item()}, Distillation loss: {dist_loss.item() if old_model is not None else 'N/A'}, EWC loss: {ewc_loss.item() if ewc is not None else 'N/A'}")
-
-                
         else:  # DocFormer
             inputs = {
                 'pixel_values': batch['pixel_values'].to(self.device),
@@ -326,8 +325,10 @@ class ExemplarManager:
     def __init__(self, 
                  max_exemplars=200, 
                  max_per_class=20, 
-                 selection_strategy="herding"):
+                 selection_strategy="herding",
+                 max_candidates=1000):
         self.exemplars = {}
+        self.max_candidates = max_candidates  # herding runs on a random pool of this many samples per class
         self.max_exemplars = max_exemplars
         self.max_per_class = max_per_class
         self.selection_strategy = selection_strategy
@@ -365,6 +366,8 @@ class ExemplarManager:
             return []
         if len(class_samples) <= self.max_per_class:
             return class_samples
+        if self.max_candidates and len(class_samples) > self.max_candidates:
+            class_samples = random.Random(0).sample(class_samples, self.max_candidates)
 
         features = []
         valid_labels = []
@@ -450,6 +453,27 @@ class ExemplarManager:
         for class_name, examples in self.exemplars.items():
             all_exemplars.extend(examples)
         return all_exemplars
+
+def fill_exemplar_memory(exemplar_mgr, dataset, classes, model_path, num_classes, device):
+    """Select exemplars for classes that have none yet (the base classes, or all previous classes when a new job
+    starts), using the previous step's model at `model_path` for herding."""
+    missing = [c for c in classes if c not in exemplar_mgr.exemplars]
+    if not missing:
+        return
+    model = None
+    if exemplar_mgr.selection_strategy == "herding" and model_path and os.path.exists(model_path):
+        from utils.eaml.eaml_model import EAMLModel
+        model = EAMLModel(num_classes=num_classes).to(device)
+        ckpt = torch.load(model_path, map_location=device, weights_only=False)
+        model.load_state_dict(ckpt.get("model_state_dict", ckpt), strict=False)
+        model.eval()
+        del ckpt
+    print(f"Selecting exemplars ({exemplar_mgr.selection_strategy}) for {len(missing)} previous classes: {missing}")
+    for c in missing:
+        exemplar_mgr.update(dataset, c, model)
+    del model
+    torch.cuda.empty_cache()
+
 
 class AdaptiveLR:
     """Adaptive learning rate scheduler for class incremental learning"""

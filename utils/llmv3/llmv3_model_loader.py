@@ -55,7 +55,18 @@ class LayoutLMv3(nn.Module):
 
         self.classifier = nn.Linear(hidden_size, num_labels)
 
+    def _check_token_ids(self, input_ids):
+        vocab_size = self.text_encoder.config.vocab_size
+        max_id = int(input_ids.max())
+        if max_id >= vocab_size:
+            raise ValueError(
+                f"input_ids contain id {max_id} but the text encoder ({self.text_encoder.config.name_or_path}) "
+                f"has vocab_size {vocab_size}. The OCR tensors were tokenized with a different tokenizer "
+                f"(e.g. LayoutLMv3/RoBERTa ids fed to BERT); use a matching text encoder or re-tokenize."
+            )
+
     def forward(self, input_ids, bbox, attention_mask, pixel_values):
+        self._check_token_ids(input_ids)
         text_out = self.text_encoder(input_ids=input_ids, attention_mask=attention_mask)
         text_embeds = text_out.last_hidden_state  # (B, seq_len, hidden)
         
@@ -82,12 +93,17 @@ class LayoutLMv3(nn.Module):
 
     @torch.no_grad()
     def extract_features(self, input_ids, bbox, attention_mask, pixel_values):
+        """Document-level features before the classifier layer, without gradients. Shape [batch_size, hidden_size]."""
+        return self.forward_features(input_ids, bbox, attention_mask, pixel_values)
+
+    def forward_features(self, input_ids, bbox, attention_mask, pixel_values):
         """
-        Extract document-level features before the classifier layer.
+        Extract document-level features before the classifier layer (keeps the autograd graph, for losses on features).
         Returns:
             torch.FloatTensor: shape [batch_size, hidden_size]
         """
         # Text path
+        self._check_token_ids(input_ids)
         text_out = self.text_encoder(input_ids=input_ids, attention_mask=attention_mask)
         text_embeds = text_out.last_hidden_state  # (B, seq_len, hidden)
 

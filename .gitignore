@@ -18,3 +18,6 @@ __pycache__/
 #old
 **/*_old.py
 **/*_old.py
+
+# Local run logs (the IL results table lives under RUN_ROOT)
+results/

@@ -75,9 +75,12 @@ class EWC:
 
 
     def penalty(self, model):
+        # Classifier heads are excluded (as for EAML): their new-class rows must stay free to learn the new class
         loss = 0
         for n, p in model.named_parameters():
-            if n in self._fisher:
+            if n.split(".")[0] == "classifier":
+                continue
+            if n in self._fisher and p.shape == self._means[n].shape:
                 loss += (self._fisher[n] * (p - self._means[n]).pow(2)).sum()
         return self.lambda_ewc * loss
 
@@ -100,7 +103,10 @@ class ExemplarHandler:
         self.exemplars = {}
 
     def update_exemplars(self, dataset, class_labels, model, device):
+        """class_labels: integer label indices (as produced by the dataset) to keep exemplars for."""
         self.exemplars = {}
+        if self.selection_method != "herding":
+            model = None  # random selection does not need features
         if model is not None:
             model.eval()
         else:
@@ -189,8 +195,8 @@ def evaluate(model, dataloader, device, all_classes, full_model_acc=None, split_
         print(f"{split_name} - Incremental Learning Gap (G_IL): {gil:.4f}")
 
     class_acc = []
-    for cls in all_classes:
-        idxs = [i for i, t in enumerate(trues) if t == cls]
+    for cls_idx, _ in enumerate(all_classes):
+        idxs = [i for i, t in enumerate(trues) if t == cls_idx]
         if not idxs:
             class_acc.append(0)
             continue

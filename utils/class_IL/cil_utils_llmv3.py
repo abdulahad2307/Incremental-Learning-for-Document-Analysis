@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+from PIL import Image
 
 class EWC:
     def __init__(self, model, dataloader, device, lambda_ewc=5000.0):

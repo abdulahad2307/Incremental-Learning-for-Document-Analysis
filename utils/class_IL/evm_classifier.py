@@ -54,8 +54,8 @@ class EVMClassifier:
                 else:
                     t = min(int(self.tailsize), len(point_distances))
                 
-                # Use only the smallest t distances for fitting
-                tailsize_distances = point_distances[:t]
+                # Use only the smallest t half-distances (margin) for fitting
+                tailsize_distances = point_distances[:t] / 2.0
                 
                 # Fit Weibull distribution
                 try:
@@ -89,13 +89,14 @@ class EVMClassifier:
                     metric=self.distance_metric
                 ).flatten()
                 
-                # Compute probabilities using the Weibull CDF
-                point_probs = 1 - np.exp(-((distances / scale) ** shape))
+                # Inclusion probability: exp(-(d/scale)^shape)
+                with np.errstate(over="ignore"):  # (d/scale)^shape -> inf means Psi = 0
+                    point_probs = np.exp(-((distances / scale) ** shape))
                 
                 # Update class probabilities (take maximum probability)
                 class_probs = np.maximum(class_probs, point_probs)
             
-            probabilities[class_name] = 1 - class_probs
+            probabilities[class_name] = class_probs
         
         return probabilities
     

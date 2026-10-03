@@ -37,5 +37,6 @@ def evm_openset_metrics(evm, features_dict, known_classes=None, threshold=None, 
         "unknown_rejection": unknown_rej,
         "y_true": y_true,
         "y_pred": y_pred,
+        "is_known": np.array([yt in evm.class_features for yt in y_true]),
         "scores": scores
     }

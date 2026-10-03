@@ -36,16 +36,27 @@ class IncrementalEVM:
     ################### GREEDY K-COVER ###################
 
     def greedy_k_set_cover(self, evs, k):
-        """Greedily select k representative extremes using coverage scores."""
+        """Greedily select up to k extreme vectors that cover the most class points.
+        EV i covers point j if its inclusion probability Psi_i(x_j) >= cover_threshold."""
         if len(evs) <= k:
             return evs
         mat = np.array([ev[0] for ev in evs])
-        incl_probs = np.zeros((len(evs), len(evs)))
+        covers = np.zeros((len(evs), len(evs)), dtype=bool)
         for i, ev in enumerate(evs):
-            dists = np.linalg.norm(mat - ev[0], axis=1)
-            incl_probs[i] = 1 - np.exp(-((dists / (ev[1] + 1e-8)) ** (ev[2] + 1e-8)))  # Avoid division by zero
-        cover_scores = incl_probs.sum(axis=1)
-        idxs = np.argsort(-cover_scores)[:k]
+            dists = pairwise_distances(mat, ev[0][None, :], metric=self.distance_metric).flatten()
+            with np.errstate(over="ignore"):
+                psi = np.exp(-((dists / (ev[1] + 1e-8)) ** (ev[2] + 1e-8)))  # Avoid division by zero
+            covers[i] = psi >= self.cover_threshold
+        uncovered = np.ones(len(evs), dtype=bool)
+        idxs = []
+        while len(idxs) < k:
+            gains = (covers & uncovered).sum(axis=1)
+            gains[idxs] = -1
+            best = int(np.argmax(gains))
+            if gains[best] <= 0:
+                break
+            idxs.append(best)
+            uncovered &= ~covers[best]
         return [evs[i] for i in idxs]
 
     
@@ -54,7 +65,7 @@ class IncrementalEVM:
     def fit_weibull(self, point, negatives):
         dists = pairwise_distances([point], negatives, metric=self.distance_metric).flatten()
         t = max(int(len(dists) * self.tailsize), 1) if self.tailsize < 1.0 else min(int(self.tailsize), len(dists))
-        tails = np.sort(dists)[:t]
+        tails = np.sort(dists)[:t] / 2.0  # half-distances (EVM margin)
         try:
             shape, loc, scale = weibull_min.fit(tails, floc=0)
         except Exception:
@@ -80,30 +91,44 @@ class IncrementalEVM:
         self.initialized = True
         return self
 
+    def _negatives_for(self, label):
+        if len(self.class_features) > 1:
+            return np.vstack([self.class_features[lab] for lab in self.class_features if lab != label])
+        return self.class_features[label]
+
     def incremental_update(self, new_features_dict):
         """Incrementally update (add new classes or add samples to existing) and refit efficiently."""
+        new_features_dict = {label: np.array(feats).astype(np.float32) for label, feats in new_features_dict.items()}
+        # Updating local database
         for label, feats in new_features_dict.items():
-            feats = np.array(feats).astype(np.float32)
-            # Updating local database
             if label in self.class_features:
                 self.class_features[label] = np.vstack((self.class_features[label], feats))
             else:
                 self.class_features[label] = feats
-            negatives = np.vstack([
-                self.class_features[lab] for lab in self.class_features if lab != label
-            ]) if len(self.class_features) > 1 else self.class_features[label]
-            # Re-fitting only EVs within max_tail, plus any new samples
-            new_evs = []
+
+        for label in self.class_features:
+            # New samples of other labels are new negatives for this label
+            new_negs = [f for lab, f in new_features_dict.items() if lab != label]
+            new_negs = np.vstack(new_negs) if new_negs else None
+            new_pos = new_features_dict.get(label)
+            if new_negs is None and new_pos is None:
+                continue
+            negatives = self._negatives_for(label)
             existing_evs = self.class_evs.get(label, [])
-            for ev in existing_evs:
-                d_to_new = pairwise_distances([ev[0]], feats, metric=self.distance_metric).flatten()
-                if np.any(d_to_new < ev[3]):
-                    scale, shape, max_tail = self.fit_weibull(ev[0], negatives)
-                    new_evs.append((ev[0], scale, shape, max_tail))
-                else:
-                    new_evs.append(ev)
-            # Addding new EVs for new points:
-            for point in feats:
+            # An EV is affected if a new negative falls inside its margin tail
+            affected = new_negs is not None and any(
+                np.any(pairwise_distances([ev[0]], new_negs, metric=self.distance_metric).flatten() / 2.0 < ev[3])
+                for ev in existing_evs
+            )
+            if affected:
+                # Margins shrank: re-fit every stored point of this class and redo the set cover,
+                # otherwise the few retained EVs no longer cover the class
+                candidates = self.class_features[label]
+                new_evs = []
+            else:
+                candidates = new_pos if new_pos is not None else []
+                new_evs = list(existing_evs)
+            for point in candidates:
                 scale, shape, max_tail = self.fit_weibull(point, negatives)
                 new_evs.append((point, scale, shape, max_tail))
             self.class_evs[label] = self.greedy_k_set_cover(new_evs, self.ev_budget)
@@ -120,28 +145,25 @@ class IncrementalEVM:
             scores = np.zeros(features.shape[0], dtype=np.float32)
             for ev in evs:
                 d = pairwise_distances(features, ev[0][None, :], metric=self.distance_metric).flatten()
-                prob = 1 - np.exp(-((d / (ev[1] + 1e-8)) ** (ev[2] + 1e-8)))
+                with np.errstate(over="ignore"):  # (d/scale)^shape -> inf means Psi = 0
+                    prob = np.exp(-((d / (ev[1] + 1e-8)) ** (ev[2] + 1e-8)))
                 scores = np.maximum(scores, prob)
-            results[label] = 1 - scores  #higher value for closer samples
+            results[label] = scores  # max inclusion probability; higher for closer samples
         return results
 
     def predict_proba_tensor(self, features):
         if not torch.is_tensor(features):
             features = torch.tensor(features, dtype=torch.float32)
-        n_samples = features.size(0)
-        class_names = list(self.class_evs.keys())
-        n_classes = len(class_names)
-        prob_mat = torch.zeros((n_samples, n_classes), dtype=torch.float32)
-        for cidx, cname in enumerate(class_names):
-            evs = self.class_evs[cname]
-            scores = torch.zeros(n_samples, dtype=torch.float32)
-            for ev in evs:
-                point = torch.tensor(ev[0], dtype=torch.float32, device=features.device)
-                d = torch.cdist(features, point.unsqueeze(0)).squeeze(1)
-                prob = 1 - torch.exp(-((d / (ev[1] + 1e-8)) ** (ev[2] + 1e-8)))
-                scores = torch.max(scores, prob)
-            prob_mat[:, cidx] = 1 - scores
-        return prob_mat.cpu()
+        device = features.device
+        cols = []
+        for cname, evs in self.class_evs.items():
+            points = torch.tensor(np.stack([ev[0] for ev in evs]), dtype=torch.float32, device=device)  # (M, D)
+            scales = torch.tensor([float(ev[1]) + 1e-8 for ev in evs], dtype=torch.float32, device=device)
+            shapes = torch.tensor([float(ev[2]) + 1e-8 for ev in evs], dtype=torch.float32, device=device)
+            d = torch.cdist(features, points)  # (N, M)
+            # Out-of-place (autograd-safe): max over extreme vectors of the inclusion probability
+            cols.append(torch.exp(-(d / scales) ** shapes).max(dim=1).values)
+        return torch.stack(cols, dim=1).cpu()
 
     def predict(self, features, threshold=None):
         if threshold is None:

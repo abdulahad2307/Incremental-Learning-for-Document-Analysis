@@ -20,6 +20,14 @@ class EVMClassifier:
         self.batch_size = batch_size
         self.max_fit_samples = max_fit_samples
     
+    def _fit_weibull(self, tail):
+        """(scale, shape) of the Weibull fitted to one extreme vector's tail of half-distances (maximum likelihood)."""
+        try:
+            shape, _, scale = weibull_min.fit(tail, floc=0)
+            return scale, shape
+        except Exception:
+            return float(np.mean(tail)), 1.0
+
     def _prune_features(self, features):
         if self.max_fit_samples and features.shape[0] > self.max_fit_samples:
             indices = np.linspace(0, features.shape[0] - 1, self.max_fit_samples).astype(int)
@@ -60,14 +68,10 @@ class EVMClassifier:
                     t = (max(int(len(point_distances) * self.tailsize), 1)
                          if isinstance(self.tailsize, float) and self.tailsize < 1.0
                          else min(int(self.tailsize), len(point_distances)))
-                    tailsize_distances = point_distances[:t]
-                    try:
-                        shape, loc, scale = weibull_min.fit(tailsize_distances, floc=0)
-                        weibull_models.append((batch_feats[i], scale, shape))
-                    except Exception:
-                        weibull_models.append((batch_feats[i],
-                                                np.mean(tailsize_distances),
-                                                1.0))
+                    # EVM fits the Weibull on half-distances to the nearest negatives (margin)
+                    tailsize_distances = point_distances[:t] / 2.0
+                    scale, shape = self._fit_weibull(tailsize_distances)
+                    weibull_models.append((batch_feats[i], scale, shape))
                 del dists
                 gc.collect()
 
@@ -88,19 +92,19 @@ class EVMClassifier:
 
         # Converting features to cuda tensors to speed pairwise dist calc
         for class_name, feats in features.items():
-            feats_tensor = torch.tensor(feats, dtype=torch.float32, device=device)
-            self.class_features[class_name] = feats_tensor
-            self.class_means[class_name] = feats_tensor.mean(dim=0).cpu().numpy()
+            arr = np.asarray(feats, dtype=np.float32)
+            self.class_features[class_name] = arr
+            self.class_means[class_name] = np.mean(arr, axis=0)
 
         for target_class in classes:
-            target_feats = self._prune_features(self.class_features[target_class].cpu().numpy())
+            target_feats = self._prune_features(self.class_features[target_class])
             target_feats_tensor = torch.tensor(target_feats, dtype=torch.float32, device=device)
 
             if len(classes) > 1:
                 negatives_np = []
                 for c in classes:
                     if c != target_class:
-                        negatives_np.append(self._prune_features(self.class_features[c].cpu().numpy()))
+                        negatives_np.append(self._prune_features(self.class_features[c]))
                 negative_feats = np.vstack(negatives_np)
             else:
                 negative_feats = target_feats
@@ -120,14 +124,10 @@ class EVMClassifier:
                     t = (max(int(len(point_distances) * self.tailsize), 1)
                          if isinstance(self.tailsize, float) and self.tailsize < 1.0
                          else min(int(self.tailsize), len(point_distances)))
-                    tailsize_distances = point_distances[:t]
-                    try:
-                        shape, loc, scale = weibull_min.fit(tailsize_distances, floc=0)
-                        weibull_models.append((batch_feats[i].cpu().numpy(), scale, shape))
-                    except Exception:
-                        weibull_models.append((batch_feats[i].cpu().numpy(),
-                                              np.mean(tailsize_distances),
-                                              1.0))
+                    # EVM fits the Weibull on half-distances to the nearest negatives (margin)
+                    tailsize_distances = point_distances[:t] / 2.0
+                    scale, shape = self._fit_weibull(tailsize_distances)
+                    weibull_models.append((batch_feats[i].cpu().numpy(), scale, shape))
                 del dists
                 torch.cuda.empty_cache()
 
@@ -157,10 +157,12 @@ class EVMClassifier:
                     dists = pairwise_distances(
                         feat_batch, point.reshape(1, -1), metric=self.distance_metric
                     ).flatten().astype(np.float32)
-                    point_probs = 1 - np.exp(-((dists / scale) ** shape))
+                    with np.errstate(over="ignore"):  # (d/scale)^shape -> inf means Psi = 0
+                        point_probs = np.exp(-((dists / scale) ** shape))
                     class_probs[start:end] = np.maximum(class_probs[start:end], point_probs)
 
-            probabilities[class_name] = 1 - class_probs  # distance-based probability
+            # Psi_class(x) = max over extreme vectors of their inclusion probability
+            probabilities[class_name] = class_probs
             gc.collect()
 
         return probabilities
@@ -179,30 +181,19 @@ class EVMClassifier:
             raise RuntimeError("EVM not fitted yet.")
 
         device = features.device
-        num_samples = features.size(0)
-        class_names = list(self.weibull_models.keys())
-        num_classes = len(class_names)
-
-        # Initializing probability tensor on CPU for aggregation
-        prob_mat = torch.zeros((num_samples, num_classes), dtype=torch.float32)
-
-        for class_idx, class_name in enumerate(class_names):
+        cols = []
+        for class_name in self.weibull_models:
             models = self.weibull_models[class_name]
-            class_probs = torch.zeros(num_samples, dtype=torch.float32, device=device)
-            for point, scale, shape in models:
-                # Converting point to tensor on device
-                point_tensor = torch.tensor(point, dtype=torch.float32, device=device).unsqueeze(0)
-                for start in range(0, num_samples, self.batch_size):
-                    end = min(start + self.batch_size, num_samples)
-                    batch_feats = features[start:end]
-                    dists = torch.cdist(batch_feats, point_tensor, p=2).squeeze(1)
-                    # Weibull CDF: 1 - exp(-(dist/scale)^shape)
-                    cdf_vals = 1 - torch.exp(- (dists / scale) ** shape)
-                    class_probs[start:end] = torch.max(class_probs[start:end], cdf_vals)
-
-            prob_mat[:, class_idx] = 1 - class_probs.cpu()  # converting to cpu tensor
-
-        return prob_mat
+            points = torch.tensor(np.stack([m[0] for m in models]), dtype=torch.float32, device=device)  # (M, D)
+            scales = torch.tensor([float(m[1]) for m in models], dtype=torch.float32, device=device)
+            shapes = torch.tensor([float(m[2]) for m in models], dtype=torch.float32, device=device)
+            # Out-of-place (autograd-safe): inclusion probability exp(-(d/scale)^shape), max over extreme vectors
+            chunks = []
+            for start in range(0, features.size(0), self.batch_size):
+                dists = torch.cdist(features[start:start + self.batch_size], points, p=2)  # (n, M)
+                chunks.append(torch.exp(-(dists / scales) ** shapes).max(dim=1).values)
+            cols.append(torch.cat(chunks))
+        return torch.stack(cols, dim=1).cpu()
 
     def predict(self, features: np.ndarray, threshold: float = None):
         """Predict class labels for input features."""

@@ -15,6 +15,21 @@ common_transform = transforms.Compose([
 
 ACCEPTED_EXTENSIONS = (".png", ".jpg", ".jpeg", ".tif", ".tiff")
 
+_OCR_FILE_CACHE = {}
+
+
+def _load_ocr_file(path):
+    """Load a single OCR tensor file dict[img_path] -> {'input_ids','attention_mask'} once per process,
+    plus a filename index for lookups when image paths differ."""
+    if path not in _OCR_FILE_CACHE:
+        print(f"Loading OCR tensor file: {path}")
+        data = torch.load(path, map_location="cpu", weights_only=False)
+        if not isinstance(data, dict):
+            raise ValueError(f"OCR tensor file must be dict[img_path] -> {{'input_ids','attention_mask'}}: {path}")
+        by_name = {os.path.basename(k): v for k, v in data.items()}
+        _OCR_FILE_CACHE[path] = (data, by_name)
+    return _OCR_FILE_CACHE[path]
+
 class EAMLDocumentDataset(datasets.ImageFolder):
     """ImageFolder with OCR tensor loading and flexible image support."""
 
@@ -27,6 +42,22 @@ class EAMLDocumentDataset(datasets.ImageFolder):
         self.imgs = self.samples
         self.ocr_tensor_dir = ocr_tensor_dir
         self.class_to_idx = class_to_idx or self.class_to_idx
+        # OCR source: a directory of per-image .pt files, or a single .pt file with a dict of all images
+        self.ocr_file = None
+        self._n_missing_ocr = 0
+        if ocr_tensor_dir and ocr_tensor_dir != "None":
+            if os.path.isfile(ocr_tensor_dir):
+                self.ocr_file = _load_ocr_file(ocr_tensor_dir)
+            elif not os.path.isdir(ocr_tensor_dir):
+                raise FileNotFoundError(f"OCR tensor path not found: {ocr_tensor_dir}")
+        else:
+            print(f"Warning: no OCR tensors for {root}; text branch gets empty input.")
+
+    def _empty_text(self):
+        return {
+            "input_ids": torch.zeros(128, dtype=torch.long),
+            "attention_mask": torch.zeros(128, dtype=torch.long),
+        }
 
     def __getitem__(self, index):
         max_attempts = 10
@@ -41,7 +72,20 @@ class EAMLDocumentDataset(datasets.ImageFolder):
 
                 # Load OCR tensor if available and valid
                 ocr_tensor = None
-                if (
+                if self.ocr_file is not None:
+                    by_path, by_name = self.ocr_file
+                    entry = by_path.get(path) or by_name.get(os.path.basename(path))
+                    if entry is not None:
+                        ocr_tensor = {
+                            "input_ids": entry["input_ids"],
+                            "attention_mask": entry["attention_mask"],
+                        }
+                    else:
+                        self._n_missing_ocr += 1
+                        if self._n_missing_ocr in (1, 100, 1000):
+                            print(f"Warning: {self._n_missing_ocr} image(s) without OCR entry in {self.ocr_tensor_dir}, e.g. {path}")
+                        ocr_tensor = self._empty_text()
+                elif (
                     self.ocr_tensor_dir
                     and self.ocr_tensor_dir != "None"
                     and os.path.isdir(self.ocr_tensor_dir)
@@ -68,11 +112,8 @@ class EAMLDocumentDataset(datasets.ImageFolder):
                     else:
                         raise FileNotFoundError(f"OCR tensor file missing: {pt_path}")
                 else:
-                    # No OCR tensor dir: provide zeros as fallback (adjust size accordingly)
-                    ocr_tensor = {
-                        "input_ids": torch.zeros(128, dtype=torch.long),
-                        "attention_mask": torch.zeros(128, dtype=torch.long),
-                    }
+                    # No OCR source: provide zeros as fallback
+                    ocr_tensor = self._empty_text()
 
                 # Map class label globally if mapping exists
                 if self.class_to_idx:

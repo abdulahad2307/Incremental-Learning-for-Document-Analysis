@@ -1,13 +1,16 @@
 import matplotlib.pyplot as plt
 
-def plot_openset_histograms(y_true, y_pred, scores, savepath=None):
+def plot_openset_histograms(y_true, y_pred, scores, savepath=None, known_mask=None):
     """
     Plots histogram of EVM scores for known and unknown true classes.
+    known_mask: bool per sample (True = class known to the EVM), e.g. evm_openset_metrics(...)["is_known"].
     """
+    if known_mask is None:
+        known_mask = [yt != "unknown" for yt in y_true]
     known = []
     unknown = []
-    for yt, s in zip(y_true, scores):
-        if yt == "unknown":
+    for is_known, s in zip(known_mask, scores):
+        if not is_known:
             unknown.append(s)
         else:
             known.append(s)

@@ -4,6 +4,7 @@ import time
 import torch
 import torch.nn as nn
 import numpy as np
+from utils.evm.evm_loss import evm_nll_loss
 from tqdm import tqdm
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 
@@ -238,42 +239,18 @@ def train_one_epoch_cil_v2(
     
     for batch in tqdm(dataloader):
         optimizer.zero_grad()
-        
-        if "images" in batch:
-            images = batch["images"].to(device)
-            input_ids = batch["texts"]["input_ids"].to(device)
-            attention_mask = batch["texts"]["attention_mask"].to(device)
-            labels = batch["labels"].to(device)
-            outputs = model(images=images, input_ids=input_ids, attention_mask=attention_mask)
-            logits = outputs["logits"] if isinstance(outputs, dict) else outputs
-            features = model.extract_features(images=images, input_ids=input_ids, attention_mask=attention_mask, texts=batch["texts"])
-        else:
-            inputs = {
-                "pixel_values": batch["pixel_values"].to(device),
-                "input_ids": batch["input_ids"].to(device),
-                "attention_mask": batch["attention_mask"].to(device),
-                "bbox": batch["bbox"].to(device)
-            }
-            labels = batch["labels"].to(device)
-            #outputs = model(**inputs, task="classification")
-            outputs = model(**inputs)
-            logits = outputs if not isinstance(outputs, dict) else outputs["logits"]
-            features = model.extract_features(**inputs)
-        
-        sup_loss = criterion(logits, labels)
-        
-        inc_loss, preds, target_labels = inc_strategy.compute_loss(
+
+        # The strategy loss includes the cross-entropy (plus distillation / EWC when enabled)
+        loss, preds, target_labels = inc_strategy.compute_loss(
             model, batch, criterion, old_model=old_model, ewc=ewc
         )
-        
-        loss = sup_loss + inc_loss
         
         loss.backward()
         optimizer.step()
         
         all_preds.extend(preds.detach().cpu().tolist())
         all_labels.extend(target_labels.detach().cpu().tolist())
-        metrics.update(np.array(all_preds), np.array(all_labels))
+        metrics.update(np.array(preds.detach().cpu().tolist()), np.array(target_labels.detach().cpu().tolist()))  # this batch only
         total_loss += loss.item()
         
     avg_loss = total_loss / len(dataloader)
@@ -394,32 +371,27 @@ def train_one_epoch_cil_with_evm(
 
             features = model.extract_features(**inputs)
 
-        loss = criterion(logits, labels)
-
-        if evm is not None and evm.initialized:
-            evm_probs = evm.predict_proba_tensor(features)  # returns cpu tensor
-            batch_indices = torch.arange(labels.size(0))
-            true_class_probs = evm_probs[batch_indices, labels.cpu()]
-            evm_loss = -torch.log(true_class_probs + 1e-8).mean()
-            loss = loss + lambda_evm * evm_loss
+        # EVM loss over samples whose class the EVM already knows (EVM is keyed by class name)
+        evm_loss = evm_nll_loss(evm, features, labels, class_names=getattr(dataloader.dataset, "current_classes", None))
 
         if inc_strategy:
-            inc_loss, preds, target_labels = inc_strategy.compute_loss(
+            # the strategy loss already includes the cross-entropy
+            loss, preds, target_labels = inc_strategy.compute_loss(
                 model, batch, criterion, old_model=old_model, ewc=ewc
             )
-            loss = loss + inc_loss if evm is None else loss + inc_loss
-            preds = preds
-            target_labels = target_labels
         else:
+            loss = criterion(logits, labels)
             preds = torch.argmax(logits, dim=1)
             target_labels = labels
+        if evm_loss is not None:
+            loss = loss + lambda_evm * evm_loss
 
         loss.backward()
         optimizer.step()
 
         all_preds.extend(preds.detach().cpu().tolist())
         all_labels.extend(target_labels.detach().cpu().tolist())
-        metrics.update(np.array(all_preds), np.array(all_labels))
+        metrics.update(np.array(preds.detach().cpu().tolist()), np.array(target_labels.detach().cpu().tolist()))  # this batch only
         total_loss += loss.item()
 
     avg_loss = total_loss / len(dataloader)

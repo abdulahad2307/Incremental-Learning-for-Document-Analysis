@@ -25,11 +25,14 @@ class OCRTensorsDataset(Dataset):
             T.ToTensor()
         ])
 
-        self.ocr_data = torch.load(ocr_tensor_file)
+        # OCR source: a directory of per-image <stem>.pt files, or one combined file (list of entries with image_path)
+        self.ocr_dir = Path(ocr_tensor_file) if Path(ocr_tensor_file).is_dir() else None
         self.ocr_map = {}
-        for entry in self.ocr_data:
-            im_path = Path(entry.get("image_path", ""))
-            self.ocr_map[str(im_path).lower()] = entry
+        if self.ocr_dir is None:
+            self.ocr_data = torch.load(ocr_tensor_file)
+            for entry in self.ocr_data:
+                im_path = Path(entry.get("image_path", ""))
+                self.ocr_map[str(im_path).lower()] = entry
 
         self.samples = []
         random.seed(seed)
@@ -41,6 +44,11 @@ class OCRTensorsDataset(Dataset):
             if images_per_class:
                 images = random.sample(images, min(images_per_class, len(images)))
             for img_path in images:
+                if self.ocr_dir is not None:
+                    pt_path = self.ocr_dir / (img_path.stem + ".pt")
+                    if pt_path.exists():
+                        self.samples.append((img_path, pt_path, c))  # loaded in __getitem__
+                    continue
                 key = str(img_path).lower()
                 if key in self.ocr_map:
                     self.samples.append((img_path, self.ocr_map[key], c))
@@ -50,6 +58,8 @@ class OCRTensorsDataset(Dataset):
 
     def __getitem__(self, idx):
         img_path, ocr_dict, cls = self.samples[idx]
+        if isinstance(ocr_dict, Path):
+            ocr_dict = torch.load(ocr_dict, weights_only=False)
         try:
             pil_image = Image.open(str(img_path)).convert("RGB")
         except (UnidentifiedImageError, OSError):
@@ -57,7 +67,7 @@ class OCRTensorsDataset(Dataset):
         image = self.transform(pil_image)
 
         input_ids = ocr_dict["input_ids"]
-        input_ids = input_ids.clamp(min=0, max=self.max_length - 1)
+        input_ids = input_ids.clamp(min=0)  # token ids must not be clamped to seq length
         attention_mask = ocr_dict["attention_mask"]
 
         if self.bbox_style == "rect":
@@ -197,7 +207,7 @@ class CILLayoutLMv3Dataset(Dataset):
         except (UnidentifiedImageError, OSError):
             pil_image = Image.new("RGB", (224, 224), color="white")
         image = self.transform(pil_image)
-        input_ids = ocr_dict["input_ids"].clamp(min=0, max=self.max_length - 1)
+        input_ids = ocr_dict["input_ids"].clamp(min=0)  # token ids must not be clamped to seq length
         attention_mask = ocr_dict["attention_mask"]
 
         if self.bbox_style == "rect":
