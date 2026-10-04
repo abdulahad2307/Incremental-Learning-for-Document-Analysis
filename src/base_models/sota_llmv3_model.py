@@ -1,8 +1,9 @@
 import argparse
 import os
 import torch
+from utils.seed import add_seed_arg, set_seed
 from utils.llmv3.llmv3_data_loader import get_dataloaders
-from utils.llmv3.llmv3_model_loader import LayoutLMv3
+from utils.llmv3.llmv3_model_loader import build_llmv3_model, checkpoint_meta, HF_LAYOUTLMV3, MODEL_TYPES
 from utils.llmv3.llmv3_train_utils import train_epoch, val_epoch
 from utils.llmv3.llmv3_eval_utils import evaluate
 
@@ -21,6 +22,10 @@ def parse_args():
     parser.add_argument("--save_dir", type=str, default="outputs")
     parser.add_argument("--max_length", type=int, default=512)
     parser.add_argument("--bbox_style", type=str, choices=["rect", "poly"], default="poly")
+    parser.add_argument("--model_type", choices=MODEL_TYPES, default="custom",
+                        help="custom: Custom LayoutLMv3 (BERT + ViT + fusion, thesis model); hf: pre-trained LayoutLMv3 "
+                             "(needs OCR tensors from tools/ocr/ocr_extraction_bbox_layoutlmv3.py and --bbox_style rect)")
+    parser.add_argument("--hf_model_name", type=str, default=HF_LAYOUTLMV3, help="Pre-trained model for --model_type hf")
     parser.add_argument("--text_encoder", type=str, default="bert-base-uncased")
     parser.add_argument("--vision_encoder", type=str, default="vit_base_patch16_224")
     parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume training")
@@ -30,11 +35,13 @@ def parse_args():
                         help="Max number of images to sample per class")
     parser.add_argument("--seed", type=int, default=42,
                         help="Seed for reproducible sampling")
+    add_seed_arg(parser)
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    set_seed(args.seed)
     os.makedirs(args.save_dir, exist_ok=True)
 
     train_image_dir = os.path.join(args.image_dir, "train")
@@ -59,11 +66,16 @@ def main():
 
     device = torch.device(args.device)
 
-    model = LayoutLMv3(
+    if args.model_type == "hf" and args.bbox_style != "rect":
+        raise ValueError("--model_type hf needs one [x0, y0, x1, y1] box per token: use --bbox_style rect")
+    model = build_llmv3_model(
+        args.model_type,
+        num_labels=num_classes,
         text_model_name=args.text_encoder,
         vision_model_name=args.vision_encoder,
-        num_labels=num_classes
+        hf_model_name=args.hf_model_name,
     )
+    print(f"Model: {type(model).__name__} ({args.model_type})")
     model.to(device)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
@@ -100,7 +112,8 @@ def main():
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'best_val_acc': best_val_acc,
-                'patience_counter': patience_counter
+                'patience_counter': patience_counter,
+                **checkpoint_meta(model),
             }, save_path)
             print(f"Saved best model to {save_path}")
         else:

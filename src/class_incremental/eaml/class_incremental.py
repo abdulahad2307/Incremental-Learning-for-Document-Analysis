@@ -4,6 +4,7 @@ import torch.nn as nn
 from typing import List, Optional
 from sklearn.metrics import precision_score, recall_score, f1_score
 
+from utils.seed import add_seed_arg, set_seed
 from utils.eaml.eaml_model import EAMLModel
 from utils.docformer.model import DocFormer
 from utils.docformer.config import DocFormerConfig
@@ -444,7 +445,9 @@ if __name__ == "__main__":
     p.add_argument('--weight_decay', type=float, default=0.01)
     #p.add_argument('--test_interval', type=int, default=20)
     p.add_argument('--patience', type=int, default=10)
+    add_seed_arg(p)
     args = p.parse_args()
+    set_seed(args.seed)
     run_log.init("eaml", "CIL", "No EVM", args)
 
     run_incremental_learning(

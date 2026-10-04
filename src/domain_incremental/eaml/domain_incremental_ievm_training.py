@@ -3,6 +3,7 @@ import random
 import torch
 import torch.nn as nn
 import numpy as np
+from utils.seed import add_seed_arg, set_seed
 from utils.domain_IL.dil_dataloader import DILDataLoader
 from utils.domain_IL.dil_train_utils import (
     save_checkpoint_dil, save_epoch_checkpoint_dil, train_one_epoch_dil,
@@ -335,7 +336,9 @@ if __name__ == "__main__":
     p.add_argument('--evm_tailsize', type=float, default=0.5)
     p.add_argument('--evm_threshold', type=float, default=0.7)
     p.add_argument('--lambda_evm', type=float, default=0.1)
+    add_seed_arg(p)
     args = p.parse_args()
+    set_seed(args.seed)
     run_log.init("eaml", "DIL", "iEVM", args)
     run_domain_incremental_with_evm_training(
         data_root=args.data_dir,

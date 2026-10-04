@@ -5,7 +5,8 @@ import torch
 import torch.nn.functional as F
 import gc
 from torch.utils.data import DataLoader, ConcatDataset
-from utils.llmv3.llmv3_model_loader import LayoutLMv3
+from utils.seed import add_seed_arg, set_seed
+from utils.llmv3.llmv3_model_loader import load_llmv3_checkpoint
 from utils.llmv3.llmv3_il_common import add_il_args, make_teacher, distill_term, center_classifier_bias, gil as gil_ratio
 from utils import run_log
 from utils.il_checks import warn_inactive_terms
@@ -46,11 +47,13 @@ def parse_args():
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
     add_il_args(parser, strategy_default="standard", evm=False, persist=False)
+    add_seed_arg(parser)
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    set_seed(args.seed)
     run_log.init("llmv3", "DIL", "No EVM", args)
     device = torch.device(args.device)
     os.makedirs(args.checkpoint_dir, exist_ok=True)
@@ -66,14 +69,8 @@ def main():
 
     print("Loading Base Model.....")
     base_num_classes = 16
-    base_model = LayoutLMv3(
-        text_model_name='bert-base-uncased',
-        vision_model_name='vit_base_patch16_224',
-        num_labels=base_num_classes
-    ).to(device)
     print("Basen Model Loading fronm :", args.base_model_path)
-    checkpoint = torch.load(args.base_model_path, map_location=device)
-    base_model.load_state_dict(checkpoint['model_state_dict'])
+    base_model, checkpoint = load_llmv3_checkpoint(args.base_model_path, base_num_classes, device)  # custom or hf, from the checkpoint
     # Frozen teacher = the base model before its classifier is expanded (the student is trained in place)
     teacher_model = make_teacher(base_model, args.strategy)
     expand_classifier(base_model, base_num_classes, num_classes, device)

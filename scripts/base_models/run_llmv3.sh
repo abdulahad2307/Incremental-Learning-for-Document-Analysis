@@ -14,7 +14,8 @@
 # Step 2 - base model: LayoutLMv3 on all 16 RVL-CDIP classes (12,500 images per class, bert-base-uncased OCR).
 # Output: $LLMV3_BASE_16 (read by the LayoutLMv3 domain-incremental scripts (step 4)).
 # Submit from the repo root (paths and classes: scripts/config.sh):
-#   sbatch scripts/base_models/run_llmv3.sh
+#   sbatch scripts/base_models/run_llmv3.sh                          # Custom LayoutLMv3
+#   sbatch --export=LLMV3_MODEL=hf scripts/base_models/run_llmv3.sh   # pre-trained LayoutLMv3 (hf OCR tensors)
 
 unset SLURM_EXPORT_ENV
 module load cuda/12.6
@@ -28,6 +29,7 @@ RESUME_EPOCH=0                           # ... and the epoch it was saved at
 mkdir -p "$OUTPUT_DIR"
 
 python src/base_models/sota_llmv3_model.py \
+  --model_type "$LLMV3_MODEL" \
   --dataset rvl_cdip \
   --image_dir "$RVL_DIR" \
   --ocr_tensor_file "$LLMV3_OCR_RVL" \

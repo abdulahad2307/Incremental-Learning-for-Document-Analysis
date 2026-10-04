@@ -8,6 +8,7 @@ from typing import List, Optional, Dict
 
 from sklearn.metrics import precision_score, recall_score, f1_score
 
+from utils.seed import add_seed_arg, set_seed
 from utils.eaml.eaml_model import EAMLModel
 from utils.docformer.model import DocFormer
 from utils.docformer.config import DocFormerConfig
@@ -666,7 +667,9 @@ if __name__ == "__main__":
     p.add_argument('--lambda_evm', type=float, default=0.1)
     p.add_argument('--lambda_ood', type=float, default=0.1)
 
+    add_seed_arg(p)
     args = p.parse_args()
+    set_seed(args.seed)
     run_log.init("eaml", "CIL", "EVM+OOD", args)
 
     run_incremental_learning_evm_ood(

@@ -1,7 +1,12 @@
+import os
+
 import torch
 import torch.nn as nn
-from transformers import BertModel
+from transformers import BertModel, LayoutLMv3Model
 import timm
+
+HF_LAYOUTLMV3 = "microsoft/layoutlmv3-base"
+MODEL_TYPES = ("custom", "hf")
 
 class VisionEncoder(nn.Module):
     def __init__(self, vision_model_name="vit_base_patch16_224"): #vit_tiny_patch16_224, vit_base_patch16_224
@@ -27,7 +32,13 @@ class VisionEncoder(nn.Module):
         x = self.norm(x)
         return x  # (B, num_patches+1, hidden_size)
 
-class LayoutLMv3(nn.Module):
+class CustomLayoutLMv3(nn.Module):
+    """Custom LayoutLMv3-style model ("Custom LLMv3"), used in the thesis and the workshop paper: bert-base-uncased
+    text encoder + box-centre layout embedding, a timm ViT, and a 2-layer fusion transformer, trained from these
+    unimodal checkpoints (no LayoutLMv3 pre-training). For the pre-trained microsoft/layoutlmv3-base see HFLayoutLMv3."""
+
+    model_type = "custom"
+
     def __init__(
         self,
         text_model_name="bert-base-uncased",
@@ -129,3 +140,100 @@ class LayoutLMv3(nn.Module):
         # Take the [CLS] token (first one) as the global document representation
         cls_token_embed = fused_out[:, 0]  # [B, hidden_size]
         return cls_token_embed
+
+
+# Old name of CustomLayoutLMv3, kept so existing imports and checkpoints keep working.
+LayoutLMv3 = CustomLayoutLMv3
+
+
+class HFLayoutLMv3(nn.Module):
+    """Pre-trained LayoutLMv3 (microsoft/layoutlmv3-base) with the same interface as CustomLayoutLMv3:
+    forward(input_ids, bbox, attention_mask, pixel_values) -> logits, forward_features / extract_features -> [CLS]
+    features, and a plain nn.Linear `classifier` on the [CLS] token (so classifier expansion, bias correction and
+    the OOD detectors work unchanged).
+
+    Inputs: LayoutLMv3 tokenizer ids (RoBERTa vocabulary, from tools/ocr/ocr_extraction_bbox_layoutlmv3.py), one
+    [x0, y0, x1, y1] box per token in 0-1000, and pixel_values in [0, 1] (as the dataloaders produce them); the
+    images are normalised here with the LayoutLMv3 image-processor mean/std of 0.5."""
+
+    model_type = "hf"
+
+    def __init__(self, num_labels=16, hf_model_name=HF_LAYOUTLMV3, dropout=0.1):
+        super().__init__()
+        self.hf_model_name = hf_model_name
+        self.backbone = LayoutLMv3Model.from_pretrained(hf_model_name)
+        hidden_size = self.backbone.config.hidden_size
+        self.dropout = nn.Dropout(dropout)
+        self.classifier = nn.Linear(hidden_size, num_labels)
+
+    def _check_inputs(self, input_ids, bbox):
+        cfg = self.backbone.config
+        if int(input_ids.max()) >= cfg.vocab_size or bool((input_ids[:, 0] != cfg.bos_token_id).any()):
+            raise ValueError(
+                f"input_ids do not look like {self.hf_model_name} tokens (sequences must start with <s> = "
+                f"{cfg.bos_token_id}, ids < {cfg.vocab_size}). The OCR tensors were probably tokenized for the custom "
+                f"model (bert-base-uncased); use the tensors from tools/ocr/ocr_extraction_bbox_layoutlmv3.py.")
+        if bbox.shape[-1] != 4:
+            raise ValueError(f"HFLayoutLMv3 needs one [x0, y0, x1, y1] box per token (bbox_style 'rect'), got {tuple(bbox.shape)}")
+
+    def _encode(self, input_ids, bbox, attention_mask, pixel_values):
+        self._check_inputs(input_ids, bbox)
+        out = self.backbone(input_ids=input_ids, bbox=bbox.long().clamp(0, 1000), attention_mask=attention_mask,
+                            pixel_values=(pixel_values - 0.5) / 0.5)
+        return out.last_hidden_state  # (B, seq_len + 1 + num_patches, hidden)
+
+    def forward(self, input_ids, bbox, attention_mask, pixel_values):
+        cls_token = self._encode(input_ids, bbox, attention_mask, pixel_values)[:, 0]
+        return self.classifier(self.dropout(cls_token))
+
+    @torch.no_grad()
+    def extract_features(self, input_ids, bbox, attention_mask, pixel_values):
+        """Document-level features before the classifier layer, without gradients. Shape [batch_size, hidden_size]."""
+        return self.forward_features(input_ids, bbox, attention_mask, pixel_values)
+
+    def forward_features(self, input_ids, bbox, attention_mask, pixel_values):
+        """[CLS] features before the classifier layer (keeps the autograd graph, for losses on features)."""
+        return self._encode(input_ids, bbox, attention_mask, pixel_values)[:, 0]
+
+
+def build_llmv3_model(model_type="custom", num_labels=16, text_model_name="bert-base-uncased",
+                      vision_model_name="vit_base_patch16_224", hf_model_name=HF_LAYOUTLMV3):
+    """custom: CustomLayoutLMv3 (thesis / workshop model); hf: pre-trained LayoutLMv3 (HFLayoutLMv3)."""
+    if model_type == "custom":
+        return CustomLayoutLMv3(text_model_name=text_model_name, vision_model_name=vision_model_name, num_labels=num_labels)
+    if model_type == "hf":
+        return HFLayoutLMv3(num_labels=num_labels, hf_model_name=hf_model_name)
+    raise ValueError(f"Unknown model_type '{model_type}'; choose from {MODEL_TYPES}")
+
+
+def infer_model_type(state_dict):
+    """Model type from the parameter names of a checkpoint (checkpoints written before model_type was stored)."""
+    if any(k.startswith("backbone.") for k in state_dict):
+        return "hf"
+    if any(k.startswith("fusion_transformer.") for k in state_dict):
+        return "custom"
+    raise ValueError("Checkpoint is neither a CustomLayoutLMv3 nor an HFLayoutLMv3 state dict")
+
+
+def checkpoint_meta(model):
+    """Fields to store next to 'model_state_dict' so the checkpoint says which model it holds."""
+    meta = {"model_type": model.model_type}
+    if model.model_type == "hf":
+        meta["hf_model_name"] = model.hf_model_name
+    return meta
+
+
+def load_llmv3_checkpoint(path, num_labels, device, model_type=None):
+    """Build the model a checkpoint was saved from (custom or hf, read from the checkpoint) and load its weights.
+    Returns (model on device, checkpoint dict)."""
+    checkpoint = torch.load(path, map_location=device)
+    state_dict = checkpoint["model_state_dict"]
+    model_type = model_type or checkpoint.get("model_type") or infer_model_type(state_dict)
+    expected = os.environ.get("LLMV3_MODEL")  # variant selected in scripts/config.sh, if any
+    if expected and expected != model_type:
+        raise ValueError(f"{path} holds a '{model_type}' LayoutLMv3 but LLMV3_MODEL={expected}; "
+                         f"submit with the matching --export=LLMV3_MODEL=... or use the matching checkpoint")
+    model = build_llmv3_model(model_type, num_labels, hf_model_name=checkpoint.get("hf_model_name", HF_LAYOUTLMV3))
+    model.load_state_dict(state_dict)
+    print(f"Loaded {type(model).__name__} ({model_type}) from {path}")
+    return model.to(device), checkpoint

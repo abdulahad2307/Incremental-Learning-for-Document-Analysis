@@ -2,7 +2,8 @@
 
   classifier_only : classifier heads only (the features are frozen: EWC and L_EVM cannot act)
   last_layer      : the model's last feature layer + the classifier heads
-                    EAML -> fusion_module, LayoutLMv3 -> last fusion-transformer layer
+                    EAML -> fusion_module, Custom LayoutLMv3 -> last fusion-transformer layer,
+                    HF LayoutLMv3 -> last encoder layer
   full            : all parameters
 """
 HEAD_NAMES = ("classifier", "image_classifier", "text_classifier", "fusion_classifier")
@@ -13,8 +14,10 @@ _ALIASES = {"full_model": "full", "full_finetune": "full", "head_only": "classif
 def last_feature_layer_prefixes(model):
     if hasattr(model, "fusion_module"):  # EAML: fused image+text features
         return ["fusion_module."]
-    if hasattr(model, "fusion_transformer"):  # LayoutLMv3: [CLS] of the last fusion layer
+    if hasattr(model, "fusion_transformer"):  # Custom LayoutLMv3: [CLS] of the last fusion layer
         return [f"fusion_transformer.layers.{len(model.fusion_transformer.layers) - 1}."]
+    if hasattr(model, "backbone") and hasattr(model.backbone, "encoder"):  # HF LayoutLMv3: last encoder layer
+        return [f"backbone.encoder.layer.{len(model.backbone.encoder.layer) - 1}."]
     raise ValueError(f"No last-layer definition for {type(model).__name__}")
 
 

@@ -6,7 +6,8 @@ import torch.nn.functional as F
 import gc
 import numpy as np
 from torch.utils.data import DataLoader, ConcatDataset
-from utils.llmv3.llmv3_model_loader import LayoutLMv3
+from utils.seed import add_seed_arg, set_seed
+from utils.llmv3.llmv3_model_loader import load_llmv3_checkpoint
 from utils.llmv3.llmv3_il_common import add_il_args, make_teacher, distill_term, center_classifier_bias, gil as gil_ratio, fit_evm, evm_open_set_eval
 from utils import run_log
 from utils.evm.evm_loss import evm_nll_loss
@@ -53,6 +54,7 @@ def parse_args():
     parser.add_argument('--evm_threshold', type=float, default=0.7)
     parser.add_argument('--lambda_evm', type=float, default=0.1)
     add_il_args(parser, strategy_default="standard", evm=True, persist=False)
+    add_seed_arg(parser)
     return parser.parse_args()
 
 # >>>>>>>>>>>>>>>>>>>> EVM routines <<<<<<<<<<<<<<<<<<<<<<<
@@ -120,6 +122,7 @@ def evm_evaluate(model, loader, global_classes, evm_tailsize=0.3, evm_threshold=
 
 def main():
     args = parse_args()
+    set_seed(args.seed)
     run_log.init("llmv3", "DIL", "EVM", args)
     device = torch.device(args.device)
     os.makedirs(args.checkpoint_dir, exist_ok=True)
@@ -135,15 +138,9 @@ def main():
 
 
     print("Loading Base Model.....")
-    base_model = LayoutLMv3(
-        text_model_name='bert-base-uncased',
-        vision_model_name='vit_base_patch16_224',
-        num_labels=base_num_classes
-    ).to(device)
-    base_model.device = device # For EVM routines
     print("Basen Model Loading from :", args.base_model_path)
-    checkpoint = torch.load(args.base_model_path, map_location=device)
-    base_model.load_state_dict(checkpoint['model_state_dict'])
+    base_model, checkpoint = load_llmv3_checkpoint(args.base_model_path, base_num_classes, device)  # custom or hf, from the checkpoint
+    base_model.device = device # For EVM routines
     # Frozen teacher = the base model before its classifier is expanded (the student is trained in place)
     teacher_model = make_teacher(base_model, args.strategy)
     expand_classifier(base_model, base_num_classes, num_classes, device)

@@ -23,6 +23,15 @@ The paper describes the real LayoutLMv3 (unified pre-training, 2-D position embe
 
 Everything below works with either option. Only the feature pooling in §2.2 differs.
 
+**Decision (issue #3): option A, keeping the custom model as well.**
+- **`utils/llmv3/llmv3_model_loader.py`** now holds two models:
+  - `CustomLayoutLMv3`: the old model. `LayoutLMv3` stays as an alias, so old imports and checkpoints keep working.
+  - `HFLayoutLMv3`: `microsoft/layoutlmv3-base` with a plain `nn.Linear` classifier on [CLS].
+- **Loading:** `load_llmv3_checkpoint` picks the right model from the checkpoint. It uses the stored `model_type`, or otherwise infers it from the parameter names.
+- **Selecting the variant for jobs:** `sbatch --export=LLMV3_MODEL=hf ...`. In `scripts/config.sh`, this switches the OCR tensors, base checkpoints, base accuracies, output folders (`llmv3hf`) and the results-table name.
+- **OCR for the HF model:** `tools/ocr/ocr_extraction_bbox_layoutlmv3.py` / `scripts/data_prep/run_ocrextractor_layoutlmv3_bbox.sh`.
+- **Feature pooling for HF:** in §2.2, pool `backbone` `last_hidden_state`; text tokens come first, then the visual [CLS] and patches.
+
 ---
 
 ## 1. Shared foundations

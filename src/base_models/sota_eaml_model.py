@@ -4,6 +4,7 @@ import torch
 import torch.optim as optim
 import time
 from torch.utils.data import DataLoader
+from utils.seed import add_seed_arg, set_seed
 from utils.eaml.dataloader import EAML_DataLoader, load_class_list
 from utils.eaml.eaml_model import EAMLModel
 from utils.eaml.mutual_learning import MutualLearningLoss
@@ -226,7 +227,9 @@ def main():
     parser.add_argument('--dropout_rate', type=float, default=0.2, help='Dropout rate')
     parser.add_argument('--freeze_image_encoder', type=bool, default=False, help='False allows weights to update, True for feature extraction only')
 
+    add_seed_arg(parser)
     args = parser.parse_args()
+    set_seed(args.seed)
 
     os.makedirs(args.output_dir, exist_ok=True)
     with open(args.class_mapping_path, 'r') as f:

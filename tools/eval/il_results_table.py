@@ -15,7 +15,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from utils.run_log import _table_path  # noqa: E402
 
-CONFIG = ["backbone", "setting", "method", "strategy", "bias_correction", "new_class"]
+CONFIG = ["backbone", "setting", "method", "strategy", "bias_correction", "seed", "new_class"]
 METRICS = ["acc", "precision", "recall", "f1", "acc_rvl", "acc_tob", "gil_base", "gil_prev",
            "evm_known_acc", "evm_unknown_rej", "ood_auroc", "ood_fpr95"]
 
@@ -32,7 +32,7 @@ def main():
     ap.add_argument("--out", help="Write to .csv or .md instead of printing")
     args = ap.parse_args()
 
-    df = pd.read_csv(args.table, dtype={"slurm_job_id": str, "new_class": str})
+    df = pd.read_csv(args.table, dtype={"slurm_job_id": str, "new_class": str, "git_commit": str})
     for col in ("backbone", "setting", "method", "run_id"):
         val = getattr(args, col.replace("-", "_"), None)
         if val:
@@ -46,7 +46,7 @@ def main():
         df = df[df["run_id"] == last_run]
 
     df = df.dropna(axis=1, how="all")
-    lead = [c for c in ["timestamp", "run_id"] + CONFIG + ["step", "epoch", "split", "phase"] if c in df]
+    lead = [c for c in ["timestamp", "run_id", "git_commit"] + CONFIG + ["step", "epoch", "split", "phase"] if c in df]
     rest = [c for c in df.columns if c not in lead and c not in ("slurm_job_id", "script", "extra")]
     if args.phase in ("final", "step_test", "open_set", "ood"):
         rest = [c for c in METRICS if c in df] + ["extra"] * ("extra" in df)

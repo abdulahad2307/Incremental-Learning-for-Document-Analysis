@@ -5,6 +5,7 @@ import numpy as np
 from typing import List, Optional
 from sklearn.metrics import precision_score, recall_score, f1_score
 
+from utils.seed import add_seed_arg, set_seed
 from utils.eaml.eaml_model import EAMLModel
 from utils.docformer.model import DocFormer
 from utils.docformer.config import DocFormerConfig
@@ -460,7 +461,9 @@ if __name__ == "__main__":
     p.add_argument('--use_bias_correction', action='store_true')
     p.add_argument('--evm_tailsize', type=float, default=0.5)
     p.add_argument('--evm_threshold', type=float, default=0.7)
+    add_seed_arg(p)
     args = p.parse_args()
+    set_seed(args.seed)
     run_log.init("eaml", "CIL", "EVM (post-hoc)", args)
     run_incremental_learning_evm(
         data_root=args.data_dir,

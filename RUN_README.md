@@ -118,6 +118,7 @@ mkdir -p logs/{1_data_prep,2_base/{eaml,llmv3,other},3_cil/{eaml,llmv3},4_dil/{e
 Always submit **from the repository root**. The log paths are relative to it, and the scripts find the code through it: they source `$SLURM_SUBMIT_DIR/scripts/config.sh`, which sets `REPO` and `PYTHONPATH` to that directory. A job therefore runs the code of the checkout it was submitted from (for example a git worktree used for development), and a job submitted from any other directory stops at once with an error.
 
 - **CIL steps** are job-array indices: `sbatch --array=3 <script>` runs step 3 (adds `CIL_ORDER[2]` = `file_folder`). Step *k* starts from the best checkpoint of step *k−1* in the same checkpoint folder, so submit the steps of one method **in order, each after the previous one finished**. A step whose previous checkpoint is missing stops at once with an error.
+- **LayoutLMv3 variant**: every LayoutLMv3 script (OCR excepted) runs either the **Custom LayoutLMv3** (default; `bert-base-uncased` + ViT + a 2-layer fusion transformer, the thesis / workshop model) or the **pre-trained LayoutLMv3** (`microsoft/layoutlmv3-base`). Select the pre-trained one with `--export=LLMV3_MODEL=hf`, e.g. `sbatch --export=LLMV3_MODEL=hf --array=1 scripts/class_incremental/llmv3/run_llmv3_classIL.sh`. The variant selects the OCR tensors, base checkpoints, base accuracies and output folders (`$CIL_ROOT/llmv3hf/`, `$DIL_ROOT/llmv3hf/`), and the results table names it `llmv3hf`. A script stops with an error if the checkpoint it loads belongs to the other variant. Add `-J <name>_hf` so the job and log names say which one ran.
 - **LayoutLMv3 strategy** is the first script argument: nothing = standard IL, `distillation` = distillation-based IL. Pass `-J <name>_kd` so the job and log name say `kd` (the commands below do). EAML has separate `*_KD.sh` scripts instead.
 - **Resuming** an interrupted job: set `RESUME_CKPT` (and for the LayoutLMv3 base models `RESUME_EPOCH`) near the top of the script to the last checkpoint, then resubmit the same command.
 - To chain all steps of one CIL method so each starts when the previous one succeeded:
@@ -141,6 +142,9 @@ sbatch.tinyfat --array=0 scripts/data_prep/run_ocrextractorWtoken.sh tobacco    
 # LayoutLMv3: bert-base-uncased tokens + boxes, one file per image
 sbatch.tinyfat scripts/data_prep/run_ocrextractor_bert_bbox.sh                   # RVL-CDIP, tasks 0-7 -> $LLMV3_OCR_RVL/
 sbatch.tinyfat --array=0 scripts/data_prep/run_ocrextractor_bert_bbox.sh tobacco # Tobacco-3482       -> $LLMV3_OCR_TOB/
+# pre-trained LayoutLMv3 (LLMV3_MODEL=hf): LayoutLMv3 tokens + boxes + OCR words, one file per image
+sbatch.tinyfat scripts/data_prep/run_ocrextractor_layoutlmv3_bbox.sh                   # RVL-CDIP, tasks 0-7 -> $LLMV3HF_OCR_RVL/
+sbatch.tinyfat --array=0 scripts/data_prep/run_ocrextractor_layoutlmv3_bbox.sh tobacco # Tobacco-3482       -> $LLMV3HF_OCR_TOB/
 
 # after all 8 EAML RVL-CDIP tasks have finished: merge the shards into one file
 sbatch.tinyfat scripts/data_prep/run_combinetensors.sh                           # -> $EAML_OCR_RVL
@@ -148,7 +152,7 @@ sbatch.tinyfat scripts/data_prep/run_combinetensors.sh                          
 
 Check: `sacct -j <jobid>` shows every task `COMPLETED`; `ls $LLMV3_OCR_RVL | wc -l` ≈ 399,829; inspect a file with `python tools/data/read_tensor.py` / `read_tensor_bbox.py`. A failed shard can be rerun alone with `--array=<k>` (the LayoutLMv3 job skips images that already have a file).
 
-Other extraction variants (not used by the pipeline): `run_ocrextractor.sh`, `run_ocrextractor_multi.sh` (plain text), `run_ocrextractorWtoken_bbox.sh` (LayoutLMv3-tokenizer ids — not usable with the model's BERT text encoder), and the Qwen2-VL scripts `run_vlm_eaml.sh`, `run_vlm_llmv3.sh`, `run_ocrextractor_vlm.sh`, `run_ocr_extractor_vlm_bbox.sh`. These still hold their own paths.
+Other extraction variants (not used by the pipeline): `run_ocrextractor.sh`, `run_ocrextractor_multi.sh` (plain text), `run_ocrextractorWtoken_bbox.sh` (older LayoutLMv3-tokenizer output; use `run_ocrextractor_layoutlmv3_bbox.sh` for the pre-trained LayoutLMv3), and the Qwen2-VL scripts `run_vlm_eaml.sh`, `run_vlm_llmv3.sh`, `run_ocrextractor_vlm.sh`, `run_ocr_extractor_vlm_bbox.sh`. These still hold their own paths.
 
 ### Step 2 — Base models (4 jobs, independent, can run in parallel; need the OCR of step 1)
 
@@ -157,9 +161,12 @@ sbatch scripts/base_models/run_eamlmodel.sh        # 2_base_eaml_11cls  -> $EAML
 sbatch scripts/base_models/run_eamlmodel_all.sh    # 2_base_eaml_16cls  -> $EAML_BASE_16  (DIL base)
 sbatch scripts/base_models/run_llmv3_11class.sh    # 2_base_llmv3_11cls -> $LLMV3_BASE_11 (CIL base)
 sbatch scripts/base_models/run_llmv3.sh            # 2_base_llmv3_16cls -> $LLMV3_BASE_16 (DIL base)
+# pre-trained LayoutLMv3 (needs the hf OCR of step 1) -> $BASE_ROOT/llmv3hf_{11,16}cls/
+sbatch --export=LLMV3_MODEL=hf -J 2_base_llmv3hf_11cls scripts/base_models/run_llmv3_11class.sh
+sbatch --export=LLMV3_MODEL=hf -J 2_base_llmv3hf_16cls scripts/base_models/run_llmv3.sh
 ```
 
-When they are done, put their **test accuracies** (last lines of each log) into `EAML_BASE_11_ACC`, `EAML_BASE_16_ACC`, `LLMV3_BASE_11_ACC`, `LLMV3_BASE_16_ACC` in `scripts/config.sh`. Steps 3–4 pass them as `--full_model_acc` / `--base_model_acc`, so G_IL is measured against the base model.
+When they are done, put their **test accuracies** (last lines of each log) into `EAML_BASE_11_ACC`, `EAML_BASE_16_ACC`, `LLMV3_BASE_11_ACC`, `LLMV3_BASE_16_ACC` (and `LLMV3HF_BASE_11_ACC`, `LLMV3HF_BASE_16_ACC` for the pre-trained LayoutLMv3) in `scripts/config.sh`. Steps 3–4 pass them as `--full_model_acc` / `--base_model_acc`, so G_IL is measured against the base model.
 
 ### Step 3 — Class-incremental learning (needs the two 11-class base models)
 
@@ -391,7 +398,13 @@ sbatch scripts/domain_incremental/eaml/run_domainIL_ood.sh   # 4_dil_eaml_ood_kd
 
 ### Step 5 — Results
 
-Every IL job appends its metrics (per epoch, per step, final, open-set and OOD) to `$RUN_ROOT/il_runs.csv`, and its full arguments to `$RUN_ROOT/il_runs_config.jsonl`. Summarise with the `mtil` env:
+Every IL job appends its metrics (per epoch, per step, final, open-set and OOD) to `$RUN_ROOT/il_runs.csv`, and its full arguments to `$RUN_ROOT/il_runs_config.jsonl`. Each row also records:
+- the run's **seed**: every script takes `--seed`, default 42. For repeated runs, add `--seed <n>` to the python command in a copy of the launcher.
+- the **git commit** of the code. A `-dirty` suffix means tracked files had uncommitted changes, so commit before running anything that goes into the paper.
+
+Runs that differ only in their seed are kept as separate results. If the table was written by an older version with other columns, jobs stop with an error instead of appending misaligned rows; move the old file aside.
+
+Summarise with the `mtil` env:
 
 ```bash
 module load python/3.12-conda && conda activate mtil

@@ -7,6 +7,7 @@ from sklearn.metrics import precision_score, recall_score, f1_score
 
 from torch.utils.data import Dataset, DataLoader
 
+from utils.seed import add_seed_arg, set_seed
 from utils.domain_IL.dil_dataloader import DILDataLoader, safe_collate
 from utils.domain_IL.dil_train_utils import (
     save_checkpoint_dil, save_epoch_checkpoint_dil, train_one_epoch_dil,
@@ -242,7 +243,9 @@ if __name__ == "__main__":
     p.add_argument('--use_bias_correction', action='store_true')
     p.add_argument('--resume', action='store_true')
     p.add_argument('--resume_ckpt_path', type=str)
+    add_seed_arg(p)
     args = p.parse_args()
+    set_seed(args.seed)
     run_log.init("eaml", "DIL", "OOD", args)
 
     run_domain_incremental_ood(

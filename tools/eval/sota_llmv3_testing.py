@@ -1,7 +1,7 @@
 import os
 import torch
 from utils.llmv3.llmv3_data_loader import get_dataloaders
-from utils.llmv3.llmv3_model_loader import LayoutLMv3
+from utils.llmv3.llmv3_model_loader import build_llmv3_model, infer_model_type, HF_LAYOUTLMV3
 from utils.llmv3.llmv3_eval_utils import evaluate
 from utils.llmv3.llmv3_train_utils import val_epoch
 
@@ -47,12 +47,15 @@ def main():
     )
 
     # Load model and weights
-    model = LayoutLMv3(
+    checkpoint = torch.load(args.checkpoint, map_location=device)
+    # Custom or pre-trained (hf) LayoutLMv3, as stored in the checkpoint (or inferred from its parameter names)
+    model = build_llmv3_model(
+        checkpoint.get("model_type") or infer_model_type(checkpoint['model_state_dict']),
+        num_labels=num_classes,
         text_model_name=args.text_encoder,
         vision_model_name=args.vision_encoder,
-        num_labels=num_classes
+        hf_model_name=checkpoint.get("hf_model_name", HF_LAYOUTLMV3),
     )
-    checkpoint = torch.load(args.checkpoint, map_location=device)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.to(device)
     model.eval()

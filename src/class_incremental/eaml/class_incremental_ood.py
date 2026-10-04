@@ -5,6 +5,7 @@ import numpy as np
 from typing import List, Optional
 from sklearn.metrics import precision_score, recall_score, f1_score
 
+from utils.seed import add_seed_arg, set_seed
 from utils.eaml.eaml_model import EAMLModel
 from utils.docformer.model import DocFormer
 from utils.docformer.config import DocFormerConfig
@@ -472,7 +473,9 @@ if __name__ == "__main__":
     p.add_argument('--ood_tpr', type=float, default=0.95, help='Fraction of known val samples accepted; sets the OOD threshold')
     p.add_argument('--ood_max_per_class', type=int, default=500, help='Samples per class used for OOD fitting/calibration/testing')
     p.add_argument('--ood_threshold', type=float, default=None, help='Deprecated, ignored: the threshold is calibrated with --ood_tpr')
+    add_seed_arg(p)
     args = p.parse_args()
+    set_seed(args.seed)
     run_log.init("eaml", "CIL", "OOD", args)
     run_incremental_learning_ood(
         data_root=args.data_dir,

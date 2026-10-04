@@ -5,6 +5,7 @@ import torch.nn as nn
 import numpy as np
 #from sklearn.metrics import precision_score, recall_score, f1_score
 #from utils.eaml.eaml_model import EAMLModel
+from utils.seed import add_seed_arg, set_seed
 from utils.domain_IL.dil_dataloader import DILDataLoader
 from utils.domain_IL.dil_train_utils import (
     save_checkpoint_dil, save_epoch_checkpoint_dil, train_one_epoch_dil,
@@ -240,7 +241,9 @@ if __name__ == "__main__":
     p.add_argument('--resume', action='store_true', help="Resume training from last checkpoint.")
     p.add_argument('--resume_ckpt_path', type=str)
 
+    add_seed_arg(p)
     args = p.parse_args()
+    set_seed(args.seed)
     run_log.init("eaml", "DIL", "No EVM", args)
     run_domain_incremental(
         data_root=args.data_dir,

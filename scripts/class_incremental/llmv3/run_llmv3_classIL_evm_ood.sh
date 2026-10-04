@@ -25,7 +25,7 @@ source "${SLURM_SUBMIT_DIR:-$PWD}/scripts/config.sh" || exit 1
 STEP=${SLURM_ARRAY_TASK_ID:?submit with: sbatch --array=<step> <script>}
 STRATEGY=${1:-standard}                  # standard | distillation (KD keeps a teacher copy in GPU memory)
 case "$STRATEGY" in standard) STRAT_TAG=std ;; distillation) STRAT_TAG=kd ;; *) echo "ERROR: strategy must be standard|distillation" >&2; exit 1 ;; esac
-CKPT_DIR=$CIL_ROOT/llmv3/evmood_$STRAT_TAG
+CKPT_DIR=$CIL_ROOT/$LLMV3_TAG/evmood_$STRAT_TAG
 cil_step "$STEP" "$CKPT_DIR" "$LLMV3_BASE_11" "layoutlmv3_cil_incremental_evm_ood_{class}_best.pt"
 RESUME_CKPT=""                           # resume this step: a checkpoint of this step in $CKPT_DIR
 mkdir -p "$CKPT_DIR"

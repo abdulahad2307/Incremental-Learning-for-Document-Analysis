@@ -29,6 +29,9 @@ EAML_OCR_RVL=$OCR_ROOT/eaml_rvl_tesseract.pt
 EAML_OCR_TOB=$OCR_ROOT/eaml_tobacco_tesseract.pt
 LLMV3_OCR_RVL=$OCR_ROOT/llmv3_rvl_bert_tesseract
 LLMV3_OCR_TOB=$OCR_ROOT/llmv3_tobacco_bert_tesseract
+# Pre-trained LayoutLMv3 (LLMV3_MODEL=hf): LayoutLMv3 tokens + boxes (+ OCR words), one .pt per image
+LLMV3HF_OCR_RVL=$OCR_ROOT/llmv3hf_rvl_tesseract
+LLMV3HF_OCR_TOB=$OCR_ROOT/llmv3hf_tobacco_tesseract
 OCR_SHARD_SIZE=50000                        # LayoutLMv3 OCR: images per array task; RVL-CDIP (399,829) = tasks 0-7
 EAML_OCR_PART_SIZE=12500                    # EAML OCR: images per array task (~6-7 h); RVL-CDIP = tasks 0-31
 RVL_NUM_IMAGES=399829                       # images in $RVL_DIR; the merged EAML OCR file must have this many entries
@@ -52,6 +55,30 @@ EAML_BASE_11_ACC=0.9302
 EAML_BASE_16_ACC=0.9120
 LLMV3_BASE_11_ACC=0.8928
 LLMV3_BASE_16_ACC=0.8892
+LLMV3HF_BASE_11_ACC=                        # pre-trained LayoutLMv3: fill in after its step-2 runs
+LLMV3HF_BASE_16_ACC=
+
+# ---------------- LayoutLMv3 variant ----------------
+# custom: Custom LayoutLMv3 (bert-base-uncased + ViT + fusion transformer; the thesis / workshop model)
+# hf:     pre-trained LayoutLMv3 (microsoft/layoutlmv3-base)
+# Choose it when submitting: sbatch --export=LLMV3_MODEL=hf <llmv3 script> ...   (default: custom)
+# It selects the OCR tensors, the base checkpoints and accuracies, the output folders ($CIL_ROOT/$LLMV3_TAG,
+# $DIL_ROOT/$LLMV3_TAG) and the backbone name in the results table (llmv3 | llmv3hf).
+export LLMV3_MODEL=${LLMV3_MODEL:-custom}
+case "$LLMV3_MODEL" in
+    custom) LLMV3_TAG=llmv3 ;;
+    hf)
+        LLMV3_TAG=llmv3hf
+        LLMV3_OCR_RVL=$LLMV3HF_OCR_RVL
+        LLMV3_OCR_TOB=$LLMV3HF_OCR_TOB
+        LLMV3_BASE_11=$BASE_ROOT/llmv3hf_11cls/layoutlmv3_rvl_cdip_best.pt
+        LLMV3_BASE_16=$BASE_ROOT/llmv3hf_16cls/layoutlmv3_rvl_cdip_best.pt
+        # until filled in, steps 3-4 stop with "invalid float value: 'set_LLMV3HF_BASE_.._ACC_in_config.sh'"
+        LLMV3_BASE_11_ACC=${LLMV3HF_BASE_11_ACC:-set_LLMV3HF_BASE_11_ACC_in_config.sh}
+        LLMV3_BASE_16_ACC=${LLMV3HF_BASE_16_ACC:-set_LLMV3HF_BASE_16_ACC_in_config.sh}
+        ;;
+    *) echo "ERROR: LLMV3_MODEL must be custom or hf, got '$LLMV3_MODEL'" >&2; exit 1 ;;
+esac
 
 # ---------------- Classes ----------------
 ALL_CLASSES="letter,form,email,handwritten,advertisement,scientific_report,scientific_publication,specification,file_folder,news_article,budget,invoice,presentation,questionnaire,resume,memo"
