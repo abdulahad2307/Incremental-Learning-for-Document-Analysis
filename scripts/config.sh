@@ -1,7 +1,13 @@
 # Shared configuration for the SLURM job scripts (sourced by scripts/**/*.sh).
 # Paths, class lists and base-model accuracies live here once; the job scripts only hold hyperparameters.
 
-REPO=/home/hpc/iwi5/iwi5280h/projects/FAU-Masters_Thesis-Ahad-Extension
+# Repo root = the directory the job was submitted from, so every checkout (e.g. a git worktree) runs its own code.
+# Submit from the repo root: cd <repo> && sbatch scripts/...   (outside SLURM: the current directory)
+REPO=${REPO:-${SLURM_SUBMIT_DIR:-$PWD}}
+if [ ! -f "$REPO/scripts/config.sh" ]; then
+    echo "ERROR: $REPO is not the repo root; submit jobs from the repo root (cd <repo> && sbatch scripts/...)" >&2
+    exit 1
+fi
 cd "$REPO" || exit 1
 export PYTHONPATH=$REPO:$PYTHONPATH
 export http_proxy=http://proxy:80

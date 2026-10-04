@@ -23,7 +23,7 @@ export https_proxy=http://proxy:80
 
 # Move to the repository folder
 
-export PYTHONPATH=/home/hpc/iwi5/iwi5280h/projects/FAU-Masters_Thesis-Ahad-Extension:$PYTHONPATH
+export PYTHONPATH=${SLURM_SUBMIT_DIR:-$PWD}:$PYTHONPATH
 
 CUSTOM_CLASSES=("letter" "form" "email" "handwritten" "advertisement" "scientific report" "invoice" "presentation" "questionnaire" "resume" "memo" )
 

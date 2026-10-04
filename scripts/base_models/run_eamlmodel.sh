@@ -20,7 +20,7 @@ unset SLURM_EXPORT_ENV
 module load cuda/12.6
 module load python/3.12-conda
 conda activate mtil
-source /home/hpc/iwi5/iwi5280h/projects/FAU-Masters_Thesis-Ahad-Extension/scripts/config.sh
+source "${SLURM_SUBMIT_DIR:-$PWD}/scripts/config.sh" || exit 1
 
 OUTPUT_DIR=$(dirname "$EAML_BASE_11")
 RESUME_CKPT=""                           # resume: "$OUTPUT_DIR/eaml_checkpoint_ep<N>.pt"

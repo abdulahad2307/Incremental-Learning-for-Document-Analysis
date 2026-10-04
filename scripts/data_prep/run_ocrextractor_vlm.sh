@@ -22,7 +22,7 @@ export https_proxy=http://proxy:80
 export HF_HUB_DISABLE_XET=1
 export HF_HOME=$WORK/.cache/huggingface
 
-export PYTHONPATH=/home/hpc/iwi5/iwi5280h/projects/FAU-Masters_Thesis-Ahad-Extension:$PYTHONPATH
+export PYTHONPATH=${SLURM_SUBMIT_DIR:-$PWD}:$PYTHONPATH
 
 # Default values
 PREPROCESSED_DIR="/home/woody/iwi5/iwi5280h/dataset/preprocessed/small_dataset2_qwen2-vl"
@@ -94,7 +94,7 @@ export http_proxy=http://proxy:80
 export https_proxy=http://proxy:80
 export HF_HUB_DISABLE_XET=1
 export HF_HOME=$WORK/.cache/huggingface
-export PYTHONPATH=/home/hpc/iwi5/iwi5280h/projects/FAU-Masters_Thesis-Ahad-Extension:$PYTHONPATH
+export PYTHONPATH=${SLURM_SUBMIT_DIR:-$PWD}:$PYTHONPATH
 
 # === CONFIGURE HERE ===
 IMAGES_DIR="/home/woody/iwi5/iwi5280h/dataset/all_prepdataset/train/memo"    # Raw images folder
@@ -145,7 +145,7 @@ export http_proxy=http://proxy:80
 export https_proxy=http://proxy:80
 export HF_HUB_DISABLE_XET=1
 export HF_HOME=$WORK/.cache/huggingface
-export PYTHONPATH=/home/hpc/iwi5/iwi5280h/projects/FAU-Masters_Thesis-Ahad-Extension:$PYTHONPATH
+export PYTHONPATH=${SLURM_SUBMIT_DIR:-$PWD}:$PYTHONPATH
 
 # === CONFIGURE HERE ===
 DATA_DIR="/home/woody/iwi5/iwi5280h/dataset/all_prepdataset/train/memo"  # Dataset root OR specific dir

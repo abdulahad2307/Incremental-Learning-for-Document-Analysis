@@ -109,13 +109,13 @@ Methods: `noevm` (ER + EWC + BC), `evm`, `evmood`, `ievm`, `regevm`; extras: `ev
 **SLURM does not create log folders**; a job whose log folder is missing dies without any output. Create them once:
 
 ```bash
-cd /home/hpc/iwi5/iwi5280h/projects/FAU-Masters_Thesis-Ahad-Extension
+cd <repo root>
 mkdir -p logs/{1_data_prep,2_base/{eaml,llmv3,other},3_cil/{eaml,llmv3},4_dil/{eaml,llmv3},tests}
 ```
 
 ### 3.3 Submitting
 
-Always submit **from the repository root** (the log paths are relative to it).
+Always submit **from the repository root**. The log paths are relative to it, and the scripts find the code through it: they source `$SLURM_SUBMIT_DIR/scripts/config.sh`, which sets `REPO` and `PYTHONPATH` to that directory. A job therefore runs the code of the checkout it was submitted from (for example a git worktree used for development), and a job submitted from any other directory stops at once with an error.
 
 - **CIL steps** are job-array indices: `sbatch --array=3 <script>` runs step 3 (adds `CIL_ORDER[2]` = `file_folder`). Step *k* starts from the best checkpoint of step *k−1* in the same checkpoint folder, so submit the steps of one method **in order, each after the previous one finished**. A step whose previous checkpoint is missing stops at once with an error.
 - **LayoutLMv3 strategy** is the first script argument: nothing = standard IL, `distillation` = distillation-based IL. Pass `-J <name>_kd` so the job and log name say `kd` (the commands below do). EAML has separate `*_KD.sh` scripts instead.

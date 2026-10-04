@@ -24,7 +24,7 @@ conda activate mtil
 export http_proxy=http://proxy:80
 export https_proxy=http://proxy:80
 
-REPO=/home/hpc/iwi5/iwi5280h/projects/FAU-Masters_Thesis-Ahad-Extension
+REPO=${SLURM_SUBMIT_DIR:-$PWD}   # repo root: submit from it (cd <repo> && sbatch scripts/tests/run_pipeline_tests.sh)
 export PYTHONPATH=$REPO:$PYTHONPATH
 export PIPELINE_TEST_DIR=${PIPELINE_TEST_DIR:-$TMPDIR}   # node-local disk: synthetic data + ~3 GB of test checkpoints
 cd $REPO

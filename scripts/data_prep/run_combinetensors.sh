@@ -18,7 +18,7 @@
 unset SLURM_EXPORT_ENV
 module load python/3.12-conda
 conda activate ocr_env
-source /home/hpc/iwi5/iwi5280h/projects/FAU-Masters_Thesis-Ahad-Extension/scripts/config.sh
+source "${SLURM_SUBMIT_DIR:-$PWD}/scripts/config.sh" || exit 1
 
 shopt -s nullglob
 PARTS=("$EAML_OCR_SHARDS"/part_*.pt)

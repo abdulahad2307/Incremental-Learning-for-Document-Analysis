@@ -20,7 +20,7 @@ unset SLURM_EXPORT_ENV
 module load cuda/12.6
 module load python/3.12-conda
 conda activate mtil
-source /home/hpc/iwi5/iwi5280h/projects/FAU-Masters_Thesis-Ahad-Extension/scripts/config.sh
+source "${SLURM_SUBMIT_DIR:-$PWD}/scripts/config.sh" || exit 1
 
 STRATEGY=${1:-standard}                  # standard | distillation (KD keeps a teacher copy in GPU memory)
 case "$STRATEGY" in standard) STRAT_TAG=std ;; distillation) STRAT_TAG=kd ;; *) echo "ERROR: strategy must be standard|distillation" >&2; exit 1 ;; esac

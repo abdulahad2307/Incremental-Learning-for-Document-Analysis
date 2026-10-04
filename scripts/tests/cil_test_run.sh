@@ -22,7 +22,7 @@ export http_proxy=http://proxy:80
 export https_proxy=http://proxy:80
 
 # Move to the repository folder
-export PYTHONPATH=/home/hpc/iwi5/iwi5280h/projects/FAU-Masters_Thesis-Ahad-Extension:$PYTHONPATH
+export PYTHONPATH=${SLURM_SUBMIT_DIR:-$PWD}:$PYTHONPATH
 
 echo "Starting CIL Test Run (Temporary Test Script Mode)..."
 

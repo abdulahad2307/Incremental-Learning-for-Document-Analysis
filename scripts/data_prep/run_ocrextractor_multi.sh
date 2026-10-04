@@ -19,7 +19,7 @@ conda activate ocr_env
 
 export http_proxy=http://proxy:80
 export https_proxy=http://proxy:80
-export PYTHONPATH=/home/hpc/iwi5/iwi5280h/projects/FAU-Masters_Thesis-Ahad-Extension:$PYTHONPATH
+export PYTHONPATH=${SLURM_SUBMIT_DIR:-$PWD}:$PYTHONPATH
 export CUDA_LAUNCH_BLOCKING=1
 
 echo "Starting OCR Extraction"

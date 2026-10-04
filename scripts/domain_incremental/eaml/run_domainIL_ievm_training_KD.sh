@@ -19,7 +19,7 @@ unset SLURM_EXPORT_ENV
 module load cuda/12.6
 module load python/3.12-conda
 conda activate mtil
-source /home/hpc/iwi5/iwi5280h/projects/FAU-Masters_Thesis-Ahad-Extension/scripts/config.sh
+source "${SLURM_SUBMIT_DIR:-$PWD}/scripts/config.sh" || exit 1
 
 CKPT_DIR=$DIL_ROOT/eaml/ievm_kd
 require_file "$EAML_BASE_16" "train the base model first"
