@@ -39,7 +39,7 @@ def parse_args():
     parser.add_argument('--use_amp', action='store_true')
     parser.add_argument('--save_interval', type=int, default=2)
     parser.add_argument('--weight_decay', type=float, default=0.01)
-    parser.add_argument('--early_stop_patience', type=int, default=5)
+    parser.add_argument('--early_stop_patience', type=int, default=10)
     parser.add_argument('--training_stage', choices=['text_pretrain', 'multimodal_pretrain', 'finetune'], default='finetune')
     parser.add_argument('--evaluate_only', action='store_true', help='Only run evaluation')
     args = parser.parse_args()

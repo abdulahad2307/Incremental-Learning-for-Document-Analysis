@@ -53,7 +53,7 @@ python src/class_incremental/eaml/class_incremental_evm_ood.py \
   --training_mode last_layer \
   --full_model_acc "$EAML_BASE_11_ACC" \
   --weight_decay 0.01 \
-  --patience 5 \
+  --patience 10 \
   --use_balanced_sampler \
   --use_bias_correction \
   --lambda_evm 0.1 \

@@ -37,7 +37,7 @@ python src/base_models/sota_eaml_model.py \
   --learning_rate 1e-3 \
   --weight_decay 0.01 \
   --device cuda \
-  --patience 1 \
+  --patience 10 \
   --keep_checkpoints 2 \
   --cls_weight 1.0 \
   --kld_weight 0.5 \

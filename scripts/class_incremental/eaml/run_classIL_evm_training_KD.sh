@@ -45,6 +45,8 @@ python src/class_incremental/eaml/class_incremental_evm_training.py \
   --lambda_ewc 5000.0 \
   --use_ewc \
   --use_exemplars \
+  --use_balanced_sampler \
+  --use_bias_correction \
   --max_exemplars 320 \
   --exemplar_selection herding \
   --training_mode last_layer \
@@ -52,7 +54,7 @@ python src/class_incremental/eaml/class_incremental_evm_training.py \
   --evm_tailsize 0.3 \
   --evm_threshold 0.7 \
   --full_model_acc "$EAML_BASE_11_ACC" \
-  --patience 5 \
+  --patience 10 \
   --evm_persist \
   ${RESUME_CKPT:+--resume --resume_checkpoint "$RESUME_CKPT"}
 

@@ -53,7 +53,7 @@ python src/class_incremental/eaml/class_incremental.py \
   --training_mode last_layer \
   --full_model_acc "$EAML_BASE_11_ACC" \
   --weight_decay 0.01 \
-  --patience 5 \
+  --patience 10 \
   ${RESUME_CKPT:+--resume --resume_checkpoint "$RESUME_CKPT"}
 
 echo "Finished. Checkpoints: $CKPT_DIR"

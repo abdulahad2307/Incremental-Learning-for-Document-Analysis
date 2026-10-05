@@ -30,7 +30,7 @@ def parse_args():
     parser.add_argument("--vision_encoder", type=str, default="vit_base_patch16_224")
     parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume training")
     parser.add_argument("--resume_epoch", type=int, default=0, help="Epoch to resume from")
-    parser.add_argument("--patience", type=int, default=3, help="Early stopping patience")
+    parser.add_argument("--patience", type=int, default=10, help="Early stopping patience")
     parser.add_argument("--images_per_class", type=int, default=None,
                         help="Max number of images to sample per class")
     parser.add_argument("--seed", type=int, default=42,

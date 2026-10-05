@@ -55,7 +55,7 @@ class BaselineModel:
 
         # Early stopping
         self.best_val_loss = float("inf")
-        self.early_stop_patience = 3  # Stop if validation loss doesn't improve for 3 epochs
+        self.early_stop_patience = 10  # Stop if validation loss doesn't improve for 10 epochs
         self.early_stop_counter = 0
 
     def train(self, train_loader, val_loader, epochs=10):

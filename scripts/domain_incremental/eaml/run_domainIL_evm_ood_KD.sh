@@ -43,8 +43,9 @@ python src/domain_incremental/eaml/domain_incremental_evm_ood.py \
   --lambda_distill 1.0 \
   --lambda_ewc 5000.0 \
   --use_ewc \
+  --use_bias_correction \
   --unfreeze_depth 2 \
-  --patience 20 \
+  --patience 10 \
   --lambda_evm 0.1 \
   --lambda_ood 0.1 \
   --ood_method vim \

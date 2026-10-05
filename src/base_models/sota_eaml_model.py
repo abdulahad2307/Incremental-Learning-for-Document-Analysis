@@ -15,7 +15,7 @@ import json
 import numpy as np
 
 class EarlyStoppingHandler:
-    def __init__(self, patience=7, min_delta=0, verbose=True):
+    def __init__(self, patience=10, min_delta=0, verbose=True):
         self.patience = patience
         self.min_delta = min_delta
         self.verbose = verbose
@@ -218,7 +218,7 @@ def main():
     parser.add_argument('--eval_only', action='store_true', help='Run evaluation only')
     parser.add_argument('--resume', type=str, help='Path to model checkpoint')
     parser.add_argument('--device', type=str, choices=['cuda', 'cpu'], help="Force device selection")
-    parser.add_argument('--patience', type=int, default=15, help='Early stopping patience')
+    parser.add_argument('--patience', type=int, default=10, help='Early stopping patience')
     parser.add_argument('--keep_checkpoints', type=int, default=2, help='Number of recent checkpoints to keep')
     parser.add_argument('--cls_weight', type=float, default=1.0, help='Weight for classification loss')
     parser.add_argument('--kld_weight', type=float, default=0.3, help='Weight for KL divergence loss')

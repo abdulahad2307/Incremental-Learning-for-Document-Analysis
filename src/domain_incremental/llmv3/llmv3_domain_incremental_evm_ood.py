@@ -42,7 +42,7 @@ def parse_args():
     parser.add_argument('--num_epochs', type=int, default=50)
     parser.add_argument('--use_ewc', action='store_true')
     parser.add_argument('--lambda_ewc', type=float, default=5000.0)
-    parser.add_argument('--patience', type=int, default=5)
+    parser.add_argument('--patience', type=int, default=10)
     parser.add_argument('--max_exemplars', type=int, default=16)
     parser.add_argument('--exemplar_selection', default='herding', choices=['random', 'herding'])
     parser.add_argument('--training_mode', default='last_layer', choices=['classifier_only', 'last_layer', 'full_model', 'full'])
@@ -266,6 +266,7 @@ def main():
 
     start_epoch = 0
     best_val_acc = 0.0
+    patience_counter = 0  # epochs without improvement of the combined val accuracy (early stopping)
     criterion = torch.nn.CrossEntropyLoss()
 
     if args.resume and args.resume_checkpoint:
@@ -417,6 +418,13 @@ def main():
                 'best_val_acc': best_val_acc,
             }, save_path)
             print(f"Saved best model checkpoint: {save_path}")
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            print(f"No improvement for {patience_counter} / {args.patience} epochs")
+            if patience_counter >= args.patience:
+                print(f"Early stopping triggered after {patience_counter} epochs without improvement.")
+                break
 
     print("Training completed. Loading best model for testing ...")
     best_path = os.path.join(args.checkpoint_dir, f"layoutlmv3_domain_incremental_evm_ood_best.pt")

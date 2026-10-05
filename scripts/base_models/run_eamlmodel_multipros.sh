@@ -85,7 +85,7 @@ python src/base_models/sota_eaml_model_multipros.py \
     --handle_empty_text $HANDLE_EMPTY_TEXT \
     --fallback_text "$FALLBACK_TEXT" \
     --num_workers 2 \
-    --patience 15 \
+    --patience 10 \
     --keep_checkpoints 3 \
     --cls_weight 1.0 \
     --kld_weight 0.5 \

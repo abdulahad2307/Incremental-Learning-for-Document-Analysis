@@ -34,7 +34,7 @@ def setup_logging(output_dir, rank=0):
         logging.basicConfig(level=logging.WARNING)
 
 class EarlyStoppingHandler:
-    def __init__(self, patience=7, min_delta=0, verbose=True):
+    def __init__(self, patience=10, min_delta=0, verbose=True):
         self.patience = patience
         self.min_delta = min_delta
         self.verbose = verbose
@@ -426,7 +426,7 @@ def main():
     # Training control
     parser.add_argument('--eval_only', action='store_true', help='Run evaluation only')
     parser.add_argument('--resume', type=str, help='Path to model checkpoint')
-    parser.add_argument('--patience', type=int, default=15, help='Early stopping patience')
+    parser.add_argument('--patience', type=int, default=10, help='Early stopping patience')
     parser.add_argument('--keep_checkpoints', type=int, default=2, help='Number of recent checkpoints to keep')
     
     # Multi-GPU arguments
