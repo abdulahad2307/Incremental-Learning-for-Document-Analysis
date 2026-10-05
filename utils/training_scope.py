@@ -2,7 +2,8 @@
 
   classifier_only : classifier heads only (the features are frozen: EWC and L_EVM cannot act)
   last_layer      : the model's last feature layer + the classifier heads
-                    EAML -> fusion_module, Custom LayoutLMv3 -> last fusion-transformer layer,
+                    EAML -> output projections of the image and text encoders (their sum is the fused
+                    feature), Custom LayoutLMv3 -> last fusion-transformer layer,
                     HF LayoutLMv3 -> last encoder layer
   full            : all parameters
 """
@@ -12,8 +13,8 @@ _ALIASES = {"full_model": "full", "full_finetune": "full", "head_only": "classif
 
 
 def last_feature_layer_prefixes(model):
-    if hasattr(model, "fusion_module"):  # EAML: fused image+text features
-        return ["fusion_module."]
+    if hasattr(model, "image_encoder") and hasattr(model, "text_encoder"):  # EAML: the layers whose outputs are fused
+        return ["image_encoder.model.classif.", "text_encoder.fc."]
     if hasattr(model, "fusion_transformer"):  # Custom LayoutLMv3: [CLS] of the last fusion layer
         return [f"fusion_transformer.layers.{len(model.fusion_transformer.layers) - 1}."]
     if hasattr(model, "backbone") and hasattr(model.backbone, "encoder"):  # HF LayoutLMv3: last encoder layer

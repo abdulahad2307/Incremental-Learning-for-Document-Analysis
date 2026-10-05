@@ -3,7 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from .image_encoder import ImageEncoder
 from .text_encoder import TextEncoder
-from .fusion_module import EnhancedFusionModule
+from .fusion_module import ElementwiseSumFusion
+from .attention_block import EAMLAttentionBlock
 
 class EAMLModel(nn.Module):
     def __init__(self, num_classes=16, embed_dim=512, dropout_rate=0.2, freeze_image_encoder=False):
@@ -12,12 +13,11 @@ class EAMLModel(nn.Module):
         self.image_encoder = ImageEncoder(embed_dim=embed_dim)
         self.text_encoder = TextEncoder(embed_dim=embed_dim)
         
-        # Enhanced fusion module
-        self.fusion_module = EnhancedFusionModule(
-            embed_dim=embed_dim, 
-            num_heads=8, 
-            dropout_rate=dropout_rate
-        )
+        # Joint image-text attention inside the branches (after Inception "Residual block 0" / BERT block 0)
+        self.attention_block = EAMLAttentionBlock(img_channels=320, txt_dim=768, d=256)
+
+        # Fusion as in the EAML paper (Eqs. 8-9): element-wise sum of the image and text features
+        self.fusion_module = ElementwiseSumFusion()
         
         # Separate classifiers for mutual learning
         self.image_classifier = nn.Linear(embed_dim, num_classes)
@@ -97,8 +97,7 @@ class EAMLModel(nn.Module):
             raise ValueError("Either 'texts' or 'input_ids' must be provided")
         
         # Extract features
-        image_feat = self.image_encoder(images)
-        text_feat = self.text_encoder(text_inputs)
+        image_feat, text_feat = self._encode(images, text_inputs)
         
         # Apply dropout for regularization
         image_feat = self.dropout(image_feat)
@@ -136,6 +135,13 @@ class EAMLModel(nn.Module):
         # During inference, return only fusion logits
         return fusion_logits
 
+    def _encode(self, images, text_inputs):
+        """Both branches with the joint attention block between their first and remaining stages."""
+        image_map = self.image_encoder.stem(images)
+        text_seq, ext_mask, text_mask = self.text_encoder.stem(text_inputs)
+        image_map, text_seq = self.attention_block(image_map, text_seq, text_mask)
+        return self.image_encoder.rest(image_map), self.text_encoder.rest(text_seq, ext_mask)
+
     def extract_features(self, images, texts, input_ids=None, attention_mask=None):
         """
         Extract fused features - used during exemplar herding.
@@ -156,8 +162,7 @@ class EAMLModel(nn.Module):
         else:
             raise ValueError("Either 'texts' or 'input_ids' must be provided")
 
-        image_feat = self.image_encoder(images)
-        text_feat = self.text_encoder(text_inputs)
+        image_feat, text_feat = self._encode(images, text_inputs)
         image_feat = F.normalize(image_feat, p=2, dim=-1)
         text_feat = F.normalize(text_feat, p=2, dim=-1)
         fused_feat = self.fusion_module(image_feat, text_feat)

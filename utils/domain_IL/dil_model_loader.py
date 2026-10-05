@@ -36,8 +36,9 @@ def load_eaml_model_partial(
     return model
 
 def set_finetune_mode(model, mode="head_only", encoder_unfreeze_depth=0):
-    """head_only: classifier heads; last_layer: fusion_module + heads; partial / partial_finetune: encoder layers with
-    index >= encoder_unfreeze_depth + fusion_module + heads; full / full_finetune: everything."""
+    """head_only: classifier heads; last_layer: last feature layer (utils/training_scope.py) + heads; partial /
+    partial_finetune: encoder layers with index >= encoder_unfreeze_depth + last feature layer + heads; full /
+    full_finetune: everything."""
     mode = {"partial_finetune": "partial", "full_finetune": "full"}.get(mode, mode)
     if mode in ("head_only", "last_layer", "full"):
         return set_training_scope(model, mode)

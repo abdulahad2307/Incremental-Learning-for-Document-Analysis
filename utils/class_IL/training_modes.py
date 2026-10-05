@@ -86,7 +86,7 @@ class ScopeTraining(TrainingMode):
 
 def get_training_mode(model: nn.Module, mode: str, trainable_layers: Optional[List[str]] = None):
     """Factory function to get the appropriate training mode.
-    classifier_only: heads only; last_layer: last feature layer (fusion_module) + heads; full / full_model: everything"""
+    classifier_only: heads only; last_layer: last feature layer (see utils/training_scope.py) + heads; full / full_model: everything"""
     if mode in ("full", "full_model"):
         return FullModelTraining(model)
     elif mode == "classifier_only":

@@ -3,7 +3,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+class ElementwiseSumFusion(nn.Module):
+    """EAML fusion (Bakkali et al., Eqs. 8-9): X_3 = X_1 + X_2, the element-wise sum of each document's image and text
+    features; the fusion classifier is applied to X_3. Each sample is fused on its own (no mixing across the batch)."""
+
+    def forward(self, image_feat, text_feat):
+        return image_feat + text_feat
+
+
 class EnhancedFusionModule(nn.Module):
+    """Earlier fusion, no longer used by EAMLModel: its attention runs over the batch dimension (softmax(Q K^T) is
+    B x B), so each document's fused feature mixes in the other documents of its batch."""
     def __init__(self, embed_dim=512, num_heads=8, dropout_rate=0.2):
         """
         Implementation of enhanced self-attention-based fusion module with residual connections

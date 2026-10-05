@@ -32,3 +32,23 @@ class TextEncoder(nn.Module):
         
         outputs = self.bert(**text)
         return self.fc(outputs.last_hidden_state[:, 0, :])
+
+    # Split after the first transformer block (EAML inserts its attention block there, after "Transformer block 0")
+    def stem(self, text):
+        """Tokenized text -> (hidden states after BERT layer 0 (B, L, 768), extended mask, attention mask (B, L))."""
+        device = next(self.bert.parameters()).device
+        input_ids = text["input_ids"].to(device)
+        attention_mask = text.get("attention_mask")
+        attention_mask = torch.ones_like(input_ids) if attention_mask is None else attention_mask.to(device)
+        token_type_ids = text.get("token_type_ids")
+        token_type_ids = None if token_type_ids is None else token_type_ids.to(device)
+        hidden = self.bert.embeddings(input_ids=input_ids, token_type_ids=token_type_ids)
+        ext_mask = self.bert.get_extended_attention_mask(attention_mask, input_ids.shape)
+        hidden = self.bert.encoder.layer[0](hidden, attention_mask=ext_mask)[0]
+        return hidden, ext_mask, attention_mask
+
+    def rest(self, hidden, ext_mask):
+        """Hidden states of stem() -> text embedding (B, embed_dim) from the [CLS] token; stem + rest == forward."""
+        for layer in self.bert.encoder.layer[1:]:
+            hidden = layer(hidden, attention_mask=ext_mask)[0]
+        return self.fc(hidden[:, 0, :])
