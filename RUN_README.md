@@ -12,12 +12,10 @@ FAU-Masters_Thesis-Ahad-Extension/
 │   └── class_mapping.json    RVL-CDIP class id -> name
 ├── requirements/
 │   ├── il-env-requirement.txt    Training env  (conda: mtil)
-│   ├── ocr-env-requirement.txt   OCR env       (conda: ocr_env)
-│   └── vlm_requirement.txt       VLM extraction env
+│   └── ocr-env-requirement.txt   OCR env       (conda: ocr_env)
 ├── scripts/                  SLURM job scripts (submit from repo root, see §3)
 │   ├── config.sh             Shared paths, class lists, base-model accuracies (sourced by the IL/base scripts)
-│   ├── setup/                Model downloads (run on the frontend, not with sbatch)
-│   ├── data_prep/            Step 1: OCR / VLM extraction, merging tensors
+│   ├── data_prep/            Step 1: OCR extraction, merging tensors
 │   ├── base_models/          Step 2: base classifiers (EAML, LayoutLMv3, DocFormer, CNN baseline)
 │   ├── class_incremental/    Step 3: eaml/run_classIL*.sh, llmv3/run_llmv3_classIL*.sh
 │   ├── domain_incremental/   Step 4: eaml/run_domainIL*.sh, llmv3/run_llmv3_domainIL*.sh
@@ -30,7 +28,7 @@ FAU-Masters_Thesis-Ahad-Extension/
 │   ├── evaluation/
 │   └── tests/
 ├── tools/                    Standalone utilities (called by scripts/data_prep or by hand)
-│   ├── data/  ocr/  vlm/
+│   ├── data/  ocr/
 │   └── eval/                 Evaluation of trained models; il_results_table.py summarises all IL runs
 ├── utils/                    Library code imported as `utils.*` (models, dataloaders, EVM, IL strategies, run_log)
 └── archive/                  Superseded files kept for reference (not used by any script)
@@ -48,13 +46,13 @@ conda create -n mtil python=3.12 -y && conda activate mtil
 pip install -r requirements/il-env-requirement.txt
 
 conda create -n ocr_env python=3.12 -y && conda activate ocr_env
-pip install -r requirements/ocr-env-requirement.txt      # + VLM jobs: pip install -r requirements/vlm_requirement.txt
+pip install -r requirements/ocr-env-requirement.txt
 ```
 
 | Env       | Used by                                                   |
 |-----------|-----------------------------------------------------------|
 | `mtil`    | `scripts/base_models`, `class_incremental`, `domain_incremental`, `tests`, `tools/eval/il_results_table.py` |
-| `ocr_env` | `scripts/data_prep`, `scripts/setup`                      |
+| `ocr_env` | `scripts/data_prep`                                       |
 
 ### 2.2 Datasets
 
@@ -68,12 +66,6 @@ pip install -r requirements/ocr-env-requirement.txt      # + VLM jobs: pip insta
    Tobacco-3482 is used as-is (`Tobacco3482-jpg/<class_name>/`); the domain-IL loader makes a stratified train/val/test split when those folders are missing.
 
 The data root and folder names are set in `scripts/config.sh` (`DATA_ROOT`, `RVL_DOMAIN`, `TOB_DOMAIN`).
-
-### 2.3 VLM models (only for the VLM extraction path)
-
-```bash
-bash scripts/setup/vlm_model_download.sh      # on the frontend (compute nodes have no internet); caches Qwen2-VL
-```
 
 ## 3. How the jobs are organised
 
@@ -99,7 +91,7 @@ Job names start with the pipeline step, then setting, backbone, method and strat
 
 | Step | Job names | Log folder |
 |---|---|---|
-| 1 Data prep | `1_ocr_*`, `1_vlm_*`, `1_merge_*` | `logs/1_data_prep/<job>_<arrayid>_<task>.out` |
+| 1 Data prep | `1_ocr_*`, `1_merge_*` | `logs/1_data_prep/<job>_<arrayid>_<task>.out` |
 | 2 Base models | `2_base_eaml_11cls`, `2_base_eaml_16cls`, `2_base_llmv3_11cls`, `2_base_llmv3_16cls` (+ `2_base_eaml_multigpu`, `2_base_docformer`, `2_base_cnn`) | `logs/2_base/{eaml,llmv3,other}/` |
 | 3 CIL | `3_cil_<backbone>_<method>_<std\|kd>`, e.g. `3_cil_eaml_evmood_kd` | `logs/3_cil/{eaml,llmv3}/<job>_step<N>_<jobid>.out` |
 | 4 DIL | `4_dil_<backbone>_<method>_<std\|kd>`, e.g. `4_dil_llmv3_evm_std` | `logs/4_dil/{eaml,llmv3}/<job>_<jobid>.out` |
@@ -152,7 +144,7 @@ sbatch.tinyfat scripts/data_prep/run_combinetensors.sh                          
 
 Check: `sacct -j <jobid>` shows every task `COMPLETED`; `ls $LLMV3_OCR_RVL | wc -l` ≈ 399,829; inspect a file with `python tools/data/read_tensor.py` / `read_tensor_bbox.py`. A failed shard can be rerun alone with `--array=<k>` (the LayoutLMv3 job skips images that already have a file).
 
-Other extraction variants (not used by the pipeline): `run_ocrextractor.sh`, `run_ocrextractor_multi.sh` (plain text), `run_ocrextractorWtoken_bbox.sh` (older LayoutLMv3-tokenizer output; use `run_ocrextractor_layoutlmv3_bbox.sh` for the pre-trained LayoutLMv3), and the Qwen2-VL scripts `run_vlm_eaml.sh`, `run_vlm_llmv3.sh`, `run_ocrextractor_vlm.sh`, `run_ocr_extractor_vlm_bbox.sh`. These still hold their own paths.
+Other extraction variants (not used by the pipeline): `run_ocrextractor.sh`, `run_ocrextractor_multi.sh` (plain text), `run_ocrextractorWtoken_bbox.sh` (older LayoutLMv3-tokenizer output; use `run_ocrextractor_layoutlmv3_bbox.sh` for the pre-trained LayoutLMv3). These still hold their own paths.
 
 ### Step 2 — Base models (4 jobs, independent, can run in parallel; need the OCR of step 1)
 

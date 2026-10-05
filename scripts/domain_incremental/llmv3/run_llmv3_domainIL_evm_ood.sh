@@ -40,14 +40,15 @@ python src/domain_incremental/llmv3/llmv3_domain_incremental_evm_ood.py \
   --checkpoint_dir "$CKPT_DIR" \
   --batch_size 32 \
   --lr 1e-3 \
-  --num_epochs 30 \
+  --num_epochs 50 \
   --use_ewc \
   --lambda_ewc 5000.0 \
   --strategy "$STRATEGY" \
   --use_bias_correction \
-  --max_exemplars 16 \
+  --max_exemplars 20 \
   --exemplar_selection herding \
   --training_mode last_layer \
+  --evm_tailsize 0.3 \
   --lambda_evm 0.1 \
   --lambda_ood 0.1 \
   --ood_method vim \

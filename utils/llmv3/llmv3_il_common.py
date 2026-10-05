@@ -25,6 +25,9 @@ def add_il_args(parser, strategy_default="standard", evm=False, ood=False, persi
     _add(parser, "--temperature", type=float, default=2.0)
     _add(parser, "--lambda_distill", type=float, default=1.0)
     _add(parser, "--use_bias_correction", action="store_true", help="Centre the classifier bias after training (as for EAML)")
+    _add(parser, "--exemplar_pool", type=int, default=1000,
+         help="Images per previous class that exemplars are selected from (herding) and EWC is estimated on "
+              "(EAML: 1000); --max_exemplars is the number kept per class")
     _add(parser, "--base_model_acc", type=float, default=None, help="Base model accuracy (fraction) for GIL w.r.t. the base model")
     if cil:
         _add(parser, "--joint_training", action="store_true",

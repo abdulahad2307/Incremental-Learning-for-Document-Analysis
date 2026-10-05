@@ -37,8 +37,8 @@ class EarlyStoppingHandler:
                 print("Early stopping triggered")
 
 class EAMLTrainer:
-    def __init__(self, model,class_list, device=None, learning_rate=1e-4, weight_decay=0.01,
-                 cls_weight=1.0, kld_weight=0.3, kld_threshold=0.1):
+    def __init__(self, model,class_list, device=None, learning_rate=1e-3, weight_decay=0.01,
+                 cls_weight=1.0, kld_weight=0.5, kld_threshold=0.1, optimizer="sgd", momentum=0.9):
         if device is None:
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
         if device == 'cuda' and not torch.cuda.is_available():
@@ -52,18 +52,25 @@ class EAMLTrainer:
             threshold=kld_threshold
         )
         self.class_list = class_list
-        self.optimizer = optim.AdamW(
-            model.parameters(),
-            lr=learning_rate,
-            weight_decay=weight_decay
-        )
-        #self.optimizer = torch.optim.SGD(
-        #    model.parameters(),
-        #    lr=learning_rate,
-        #    momentum=0.9,
-        #    nesterov=True,
-        #    weight_decay=weight_decay
-        #)
+        # EAML paper (Bakkali et al., 2021, Sec. 5.3): SGD with Nesterov momentum, lr 1e-3 halved every 10 epochs
+        if optimizer == "sgd":
+            self.optimizer = optim.SGD(
+                model.parameters(),
+                lr=learning_rate,
+                momentum=momentum,
+                nesterov=True,
+                weight_decay=weight_decay
+            )
+        elif optimizer == "adamw":
+            self.optimizer = optim.AdamW(
+                model.parameters(),
+                lr=learning_rate,
+                weight_decay=weight_decay
+            )
+        else:
+            raise ValueError(f"Unknown optimizer '{optimizer}'; choose sgd or adamw")
+        print(f"Optimizer: {optimizer} (lr={learning_rate}, weight_decay={weight_decay}"
+              + (f", Nesterov momentum={momentum})" if optimizer == "sgd" else ")") + "; lr x0.5 every 10 epochs")
         #self.scheduler = lr_scheduler.CosineAnnealingWarmRestarts(
         #    self.optimizer,
         #    T_0=10,
@@ -209,19 +216,25 @@ def main():
     parser.add_argument('--data_dir', type=str, required=True, help='Path to dataset directory')
     parser.add_argument('--ocr_data_path', type=str, required=True, help='Path to precomputed OCR file (.json or .pt)')
     parser.add_argument('--output_dir', type=str, default='outputs', help='Output directory')
-    parser.add_argument('--batch_size', type=int, default=32, help='Batch size')
+    parser.add_argument('--batch_size', type=int, default=16, help='Batch size (16 in the EAML paper)')
     parser.add_argument('--num_epochs', type=int, default=50, help='Number of epochs')
-    parser.add_argument('--learning_rate', type=float, default=1e-4, help='Learning rate')
+    parser.add_argument('--learning_rate', type=float, default=1e-3, help='Initial learning rate (halved every 10 epochs)')
+    parser.add_argument('--optimizer', choices=['sgd', 'adamw'], default='sgd',
+                        help='sgd: SGD with Nesterov momentum, as in the EAML paper; adamw: AdamW')
+    parser.add_argument('--momentum', type=float, default=0.9, help='Nesterov momentum for --optimizer sgd')
     parser.add_argument('--weight_decay', type=float, default=0.01, help='Weight decay for L2 regularization')
     parser.add_argument('--class_mapping_path', type=str, required=True, help='Path to JSON file with full class mapping')
     parser.add_argument('--classes', type=str, default=None, help='Comma-separated list of class names to subset')
+    parser.add_argument('--images_per_class', type=int, default=None,
+                        help='Train on this many images per class (reproducible subset, same as the LayoutLMv3 base); '
+                             'default: all. Validation always uses the full val split')
     parser.add_argument('--eval_only', action='store_true', help='Run evaluation only')
     parser.add_argument('--resume', type=str, help='Path to model checkpoint')
     parser.add_argument('--device', type=str, choices=['cuda', 'cpu'], help="Force device selection")
     parser.add_argument('--patience', type=int, default=10, help='Early stopping patience')
     parser.add_argument('--keep_checkpoints', type=int, default=2, help='Number of recent checkpoints to keep')
     parser.add_argument('--cls_weight', type=float, default=1.0, help='Weight for classification loss')
-    parser.add_argument('--kld_weight', type=float, default=0.3, help='Weight for KL divergence loss')
+    parser.add_argument('--kld_weight', type=float, default=0.5, help='Weight of the truncated-KL mutual-learning term (beta=0.5 in the EAML paper)')
     parser.add_argument('--kld_threshold', type=float, default=0.1, help='Threshold for truncated KL divergence')
     parser.add_argument('--embed_dim', type=int, default=512, help='Embedding dimension')
     parser.add_argument('--dropout_rate', type=float, default=0.2, help='Dropout rate')
@@ -267,7 +280,9 @@ def main():
         data_dir=args.data_dir,
         batch_size=args.batch_size,
         class_list=class_list,
-        ocr_data_path=args.ocr_data_path
+        ocr_data_path=args.ocr_data_path,
+        images_per_class=args.images_per_class,
+        seed=args.seed
     )
 
     train_loader = eaml_loader.get_loader('train')
@@ -289,7 +304,9 @@ def main():
         weight_decay=args.weight_decay,
         cls_weight=args.cls_weight,
         kld_weight=args.kld_weight,
-        kld_threshold=args.kld_threshold
+        kld_threshold=args.kld_threshold,
+        optimizer=args.optimizer,
+        momentum=args.momentum,
     )
 
     if args.resume:

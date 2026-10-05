@@ -13,6 +13,11 @@ export PYTHONPATH=$REPO:$PYTHONPATH
 export http_proxy=http://proxy:80
 export https_proxy=http://proxy:80
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+# Pretrained models (bert-base-uncased, timm backbones, microsoft/layoutlmv3-base) are cached on woody, not in the
+# small $HOME quota. hf_xet is not installed and xet downloads fail here, so use plain HTTP downloads.
+export HF_HOME=/home/woody/iwi5/iwi5280h/model_cache/hf_home
+export HF_HUB_DISABLE_XET=1
+
 
 # ---------------- Data ----------------
 DATA_ROOT=/home/woody/iwi5/iwi5280h/dataset

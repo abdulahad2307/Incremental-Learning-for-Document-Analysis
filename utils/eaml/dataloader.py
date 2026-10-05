@@ -8,6 +8,8 @@ from torchvision import transforms
 from transformers import BertTokenizer
 from typing import Optional, List, Dict
 
+from utils.data_subset import select_per_class, DEFAULT_SEED
+
 class EAML_Dataset(Dataset):
     def __init__(
         self,
@@ -17,9 +19,13 @@ class EAML_Dataset(Dataset):
         ocr_data_path: Optional[str] = None,
         img_size: int = 229,
         handle_empty_text: str = "exclude",
-        fallback_text: str = "[EMPTY]"
+        fallback_text: str = "[EMPTY]",
+        images_per_class: Optional[int] = None,
+        seed: int = DEFAULT_SEED
     ):
         self.data_dir = data_dir
+        self.images_per_class = images_per_class  # None: all images; else a reproducible subset per class
+        self.seed = seed
         self.transform = transform
         self.class_list = class_list if class_list else None
         self.img_size = img_size
@@ -84,49 +90,54 @@ class EAML_Dataset(Dataset):
         skipped_empty = 0
         skipped_errors = 0
         classes_set = set(self.class_list)
+        candidates = {}
         for root, _, files in os.walk(self.data_dir):
             label = os.path.basename(root)
             if label not in classes_set:
                 continue
-            for img_file in files:
-                if img_file.lower().endswith((".tif", ".png", ".jpg", ".jpeg")):
-                    img_path = os.path.join(root, img_file)
-                    try:
-                        ocr_entry = self._get_ocr_entry(img_path)
-                        if ocr_entry is None:
-                            skipped_errors += 1
-                            continue
-                        if self.ocr_tokenized:
-                            # Already tokenized
-                            tokenized = {
-                                "input_ids": ocr_entry["input_ids"],
-                                "attention_mask": ocr_entry["attention_mask"]
-                            }
-                        else:
-                            # String, needs tokenization
-                            text = ocr_entry
-                            if self._is_text_empty(text):
-                                if self.handle_empty_text == "exclude":
-                                    skipped_empty += 1
-                                    continue
-                                elif self.handle_empty_text == "fallback":
-                                    text = self.fallback_text
-                            tokenized = self.tokenizer(
-                                text,
-                                padding="max_length",
-                                truncation=True,
-                                max_length=128,
-                                return_tensors="pt"
-                            )
-                            tokenized = {
-                                "input_ids": tokenized["input_ids"].squeeze(0),
-                                "attention_mask": tokenized["attention_mask"].squeeze(0)
-                            }
-                        self.samples.append((img_path, tokenized, label))
-                        valid_samples += 1
-                    except Exception as e:
-                        print(f"Error processing {img_path}: {e}")
+            candidates.setdefault(label, []).extend(
+                os.path.join(root, f) for f in files if f.lower().endswith((".tif", ".png", ".jpg", ".jpeg")))
+        for label, paths in sorted(candidates.items()):
+            selected = select_per_class(paths, self.images_per_class, self.seed, label)
+            if self.images_per_class is not None:
+                print(f"  {label}: {len(selected)} of {len(paths)} images (seed {self.seed})")
+            for img_path in selected:
+                try:
+                    ocr_entry = self._get_ocr_entry(img_path)
+                    if ocr_entry is None:
                         skipped_errors += 1
+                        continue
+                    if self.ocr_tokenized:
+                        # Already tokenized
+                        tokenized = {
+                            "input_ids": ocr_entry["input_ids"],
+                            "attention_mask": ocr_entry["attention_mask"]
+                        }
+                    else:
+                        # String, needs tokenization
+                        text = ocr_entry
+                        if self._is_text_empty(text):
+                            if self.handle_empty_text == "exclude":
+                                skipped_empty += 1
+                                continue
+                            elif self.handle_empty_text == "fallback":
+                                text = self.fallback_text
+                        tokenized = self.tokenizer(
+                            text,
+                            padding="max_length",
+                            truncation=True,
+                            max_length=128,
+                            return_tensors="pt"
+                        )
+                        tokenized = {
+                            "input_ids": tokenized["input_ids"].squeeze(0),
+                            "attention_mask": tokenized["attention_mask"].squeeze(0)
+                        }
+                    self.samples.append((img_path, tokenized, label))
+                    valid_samples += 1
+                except Exception as e:
+                    print(f"Error processing {img_path}: {e}")
+                    skipped_errors += 1
         print(f"Loaded {valid_samples} valid samples")
         print(f"Skipped {skipped_empty} samples due to empty text")
         print(f"Skipped {skipped_errors} samples due to errors")
@@ -213,7 +224,9 @@ class EAML_DataLoader:
         class_list: Optional[List[str]] = None,
         ocr_data_path: Optional[str] = None,
         handle_empty_text: str = "exclude",
-        fallback_text: str = "[EMPTY]"
+        fallback_text: str = "[EMPTY]",
+        images_per_class: Optional[int] = None,
+        seed: int = DEFAULT_SEED
     ):
         if not class_list:
             raise ValueError("class_list cannot be empty")
@@ -225,6 +238,8 @@ class EAML_DataLoader:
         self.ocr_data_path = ocr_data_path
         self.handle_empty_text = handle_empty_text
         self.fallback_text = fallback_text
+        self.images_per_class = images_per_class  # applied to the train split only
+        self.seed = seed
         self.transform_train = self._build_transform(train=True)
         self.transform_eval = self._build_transform(train=False)
 
@@ -236,12 +251,12 @@ class EAML_DataLoader:
                                  std=[0.229, 0.224, 0.225])
         ]
         if train:
+            # EAML paper (Sec. 5.3): horizontal/vertical shift of 0.1, shear of 0.1 (Keras shear_range, in degrees)
+            # and cutout (random erasing on the normalised tensor)
             aug_transforms = [
-                transforms.RandomAffine(degrees=0, translate=(0.1, 0.1), shear=10),
-                transforms.RandomHorizontalFlip(p=0.5),
-                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1)
+                transforms.RandomAffine(degrees=0, translate=(0.1, 0.1), shear=0.1),
             ]
-            return transforms.Compose(aug_transforms + base_transforms)
+            return transforms.Compose(aug_transforms + base_transforms + [transforms.RandomErasing(p=0.5, value=0)])
         else:
             return transforms.Compose(base_transforms)
 
@@ -257,7 +272,9 @@ class EAML_DataLoader:
             ocr_data_path=self.ocr_data_path,
             img_size=self.img_size,
             handle_empty_text=self.handle_empty_text,
-            fallback_text=self.fallback_text
+            fallback_text=self.fallback_text,
+            images_per_class=self.images_per_class if split == "train" else None,
+            seed=self.seed
         )
         return TorchDataLoader(
             dataset,

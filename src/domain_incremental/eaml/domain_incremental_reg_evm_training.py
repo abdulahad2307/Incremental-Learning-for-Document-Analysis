@@ -174,7 +174,9 @@ def run_domain_incremental_with_evm_training(
     pretrained_domain = domains[0]
     incremental_domain = domains[1]
     train_loader = dil_loader.get_domain_loaders('train').get(incremental_domain)
-    val_loader = dil_loader.get_domain_loaders('val').get(incremental_domain)
+    val_loaders = dil_loader.get_domain_loaders('val')
+    val_loader = val_loaders.get(incremental_domain)
+    val_loader_pretrained = val_loaders.get(pretrained_domain)
     test_loaders = dil_loader.get_domain_loaders('test')
     test_loader_pretrained = test_loaders.get(pretrained_domain)
     test_loader_incremental = test_loaders.get(incremental_domain)
@@ -189,7 +191,7 @@ def run_domain_incremental_with_evm_training(
     )
     model = set_finetune_mode(model, finetune_mode, unfreeze_depth)
     warn_inactive_terms(model, use_ewc=use_ewc, lambda_evm=lambda_evm)
-    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, weight_decay=weight_decay)
+    optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, weight_decay=weight_decay)
     lr_scheduler = AdaptiveLR(optimizer)
     criterion = torch.nn.CrossEntropyLoss()
     # Fisher from the pretrained domain's val split (not test) to avoid test leakage
@@ -204,7 +206,7 @@ def run_domain_incremental_with_evm_training(
     old_model.eval()  # teacher keeps its original old_classes outputs; distillation covers those classes
     best_val_acc = 0.0
     best_val_loss = float('inf')
-    best_model_path = None
+    best_model_path = os.path.join(checkpoint_dir, "best_model.pth")
     no_improve = 0
     start_epoch = 1
 
@@ -251,7 +253,11 @@ def run_domain_incremental_with_evm_training(
             evm=evm_hybrid,
             lambda_evm=lambda_evm
         )
-        val_loss, val_acc = evaluate_dil(model, {incremental_domain: val_loader}, DEVICE)
+        val_loss_tob, val_acc_tob = evaluate_dil(model, {incremental_domain: val_loader}, DEVICE)
+        val_loss_rvl, val_acc_rvl = evaluate_dil(model, {pretrained_domain: val_loader_pretrained}, DEVICE)
+        # model selection on the mean of both domains' val accuracy (same as the LayoutLMv3 DIL scripts)
+        val_loss, val_acc = (val_loss_rvl + val_loss_tob) / 2, (val_acc_rvl + val_acc_tob) / 2
+        print(f"Val Acc RVL-CDIP: {val_acc_rvl:.4f}, Tobacco-3482: {val_acc_tob:.4f}")
         print(f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
         run_log.log("epoch", epoch=epoch, train_loss=train_loss, train_acc=train_acc, val_loss=val_loss, val_acc=val_acc)
         is_best = (val_acc > best_val_acc) or (val_acc == best_val_acc and val_loss < best_val_loss)

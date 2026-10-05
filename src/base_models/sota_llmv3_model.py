@@ -16,8 +16,13 @@ def parse_args():
                         help="Comma-separated limited class list to train on, e.g. letter,form,email")
     parser.add_argument("--image_dir", type=str, required=True)
     parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--grad_accum_steps", type=int, default=1,
+                        help="Batches per optimizer step; effective batch = batch_size x grad_accum_steps "
+                             "(LayoutLMv3 paper: 64, e.g. 8 x 8)")
+    parser.add_argument("--max_steps", type=int, default=None,
+                        help="Stop after this many optimizer steps (LayoutLMv3 paper: 20,000); --epochs is an upper bound")
     parser.add_argument("--epochs", type=int, default=5)
-    parser.add_argument("--lr", type=float, default=2e-5)
+    parser.add_argument("--lr", type=float, default=2e-5, help="Fixed learning rate (2e-5 in the LayoutLMv3 paper)")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--save_dir", type=str, default="outputs")
     parser.add_argument("--max_length", type=int, default=512)
@@ -61,7 +66,8 @@ def main():
         max_length=args.max_length,
         bbox_style=args.bbox_style,
         images_per_class=args.images_per_class,
-        seed=args.seed
+        seed=args.seed,
+        val_image_dir=val_image_dir if os.path.isdir(val_image_dir) else None,  # official val split
     )
 
     device = torch.device(args.device)
@@ -78,10 +84,11 @@ def main():
     print(f"Model: {type(model).__name__} ({args.model_type})")
     model.to(device)
 
+    # LayoutLMv3 paper (Huang et al., 2022), RVL-CDIP fine-tuning: AdamW with a fixed learning rate of 2e-5
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
-    batches_per_epoch = len(train_loader)
-    total_steps = batches_per_epoch * args.epochs
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_steps, eta_min=0)
+    print(f"Optimizer: AdamW, fixed lr={args.lr}; effective batch {args.batch_size * args.grad_accum_steps} "
+          f"({args.batch_size} x {args.grad_accum_steps})" + (f", at most {args.max_steps} steps" if args.max_steps else ""))
+    total_steps = 0
 
     best_val_acc = 0.0
     patience_counter = 0
@@ -93,15 +100,19 @@ def main():
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         best_val_acc = checkpoint['best_val_acc']
         patience_counter = checkpoint.get('patience_counter', 0)
+        total_steps = checkpoint.get('total_steps', 0)
         print(f"Resumed training from {args.resume} at epoch {args.resume_epoch}")
 
     for epoch in range(args.resume_epoch + 1, args.epochs + 1):
-        train_loss, train_acc = train_epoch(model, train_loader, optimizer, device)
+        remaining = None if args.max_steps is None else args.max_steps - total_steps
+        train_loss, train_acc, steps = train_epoch(model, train_loader, optimizer, device,
+                                                   grad_accum_steps=args.grad_accum_steps,
+                                                   max_optimizer_steps=remaining)
+        total_steps += steps
         val_loss, val_acc = val_epoch(model, val_loader, device)
 
-        print(f"Epoch {epoch}: Train loss={train_loss:.4f}, acc={train_acc:.4f} / Val loss={val_loss:.4f}, acc={val_acc:.4f}")
-
-        scheduler.step(val_acc)
+        print(f"Epoch {epoch}: Train loss={train_loss:.4f}, acc={train_acc:.4f} / Val loss={val_loss:.4f}, acc={val_acc:.4f} "
+              f"(optimizer steps: {total_steps})")
 
         if val_acc > best_val_acc:
             best_val_acc = val_acc
@@ -113,6 +124,7 @@ def main():
                 'optimizer_state_dict': optimizer.state_dict(),
                 'best_val_acc': best_val_acc,
                 'patience_counter': patience_counter,
+                'total_steps': total_steps,
                 **checkpoint_meta(model),
             }, save_path)
             print(f"Saved best model to {save_path}")
@@ -122,6 +134,9 @@ def main():
 
         if patience_counter >= args.patience:
             print("Early stopping triggered.")
+            break
+        if args.max_steps is not None and total_steps >= args.max_steps:
+            print(f"Reached --max_steps ({total_steps} optimizer steps).")
             break
 
     print("Training completed.")

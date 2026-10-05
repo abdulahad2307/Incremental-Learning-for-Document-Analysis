@@ -7,6 +7,7 @@ import gc
 import numpy as np
 from torch.utils.data import DataLoader, ConcatDataset
 from utils.seed import add_seed_arg, set_seed
+from utils.domain_IL.dil_utils import AdaptiveLR
 from utils.llmv3.llmv3_model_loader import load_llmv3_checkpoint
 from utils.llmv3.llmv3_il_common import add_il_args, make_teacher, distill_term, center_classifier_bias, gil as gil_ratio, fit_evm, evm_open_set_eval
 from utils import run_log
@@ -107,7 +108,7 @@ def hybrid_loss(logits, features, labels, evm, criterion, global_classes, lambda
 def evm_evaluate(model, loader, global_classes, evm_tailsize=0.3, evm_threshold=0.7):
     feature_dict, features, labels = extract_features_for_evm(model, loader, model.device, global_classes)
     #evm = EVMClassifier(tailsize=evm_tailsize, cover_threshold=evm_threshold)
-    evm = IncrementalEVM(tailsize=0.5, ev_budget=10, cover_threshold=0.7)
+    evm = IncrementalEVM(tailsize=evm_tailsize, ev_budget=10, cover_threshold=evm_threshold)
     evm.fit(feature_dict)
     preds, _ = evm.predict(features, threshold=evm_threshold)
     if isinstance(global_classes[0], str):
@@ -166,7 +167,7 @@ def main():
         image_dir=base_data_dir,
         split="train",
         batch_size=args.batch_size,
-        images_per_class=args.max_exemplars,
+        images_per_class=args.exemplar_pool,  # candidate pool for herding and EWC
         seed=args.seed,
     )
     print(f"Base domain training samples: {len(base_train_loader.dataset)}")
@@ -196,7 +197,7 @@ def main():
         image_dir=base_data_dir,
         split="val",
         batch_size=args.batch_size,
-        images_per_class=1250,
+        images_per_class=None,  # full split (same as EAML)
         seed=args.seed,
     )
     print(f"Base domain val samples: {len(base_val_loader.dataset)}")
@@ -225,7 +226,7 @@ def main():
         image_dir=base_data_dir,
         split="test",
         batch_size=args.batch_size,
-        images_per_class=1250,
+        images_per_class=None,  # full split (same as EAML)
         seed=args.seed,
     )
     print(f"Base domain test samples: {len(base_test_loader.dataset)}")
@@ -262,6 +263,8 @@ def main():
 
     ewc = EWC(model, base_train_loader, device, fisher_n=500, lambda_ewc=args.lambda_ewc) if args.use_ewc else None
     optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr, weight_decay=0.01)
+    # adaptive lr as in the EAML DIL scripts: lr x0.7 after 3 epochs without val improvement
+    lr_sched = AdaptiveLR(optimizer)
 
     start_epoch = 0
     best_val_acc = 0.0
@@ -283,7 +286,7 @@ def main():
     print("Initializing EVM...")
     feature_dict, _, _ = extract_features_for_evm(model, inc_train_loader, device, all_classes)
     #evm_hybrid = EVMClassifier(tailsize=args.evm_tailsize, cover_threshold=args.evm_threshold)
-    evm_hybrid = IncrementalEVM(tailsize=0.5, ev_budget=10, cover_threshold=0.7)
+    evm_hybrid = IncrementalEVM(tailsize=args.evm_tailsize, ev_budget=10, cover_threshold=args.evm_threshold)
     evm_hybrid.fit(feature_dict)
     print("EVM Initialized.")
 
@@ -392,6 +395,7 @@ def main():
 
         # Save best model based on combined accuracies or your preferred metric
         combined_acc = (val_acc_base + val_acc_inc) / 2
+        lr_sched.step({'accuracy': combined_acc})
         if combined_acc > best_val_acc:
             best_val_acc = combined_acc
             save_path = os.path.join(args.checkpoint_dir, f"layoutlmv3_domain_incremental_best.pt")

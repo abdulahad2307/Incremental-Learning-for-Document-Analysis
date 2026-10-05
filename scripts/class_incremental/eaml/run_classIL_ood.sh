@@ -37,7 +37,7 @@ python src/class_incremental/eaml/class_incremental_ood.py \
   --base_model_path "$BASE_MODEL" \
   --model_name eaml \
   --checkpoint_dir "$CKPT_DIR" \
-  --batch_size 8 \
+  --batch_size 64 \
   --lr 1e-3 \
   --full_model_acc "$EAML_BASE_11_ACC" \
   --weight_decay 0.01 \

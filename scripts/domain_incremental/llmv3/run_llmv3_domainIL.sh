@@ -45,7 +45,7 @@ python src/domain_incremental/llmv3/llmv3_domain_incremental.py \
   --lambda_ewc 5000.0 \
   --strategy "$STRATEGY" \
   --use_bias_correction \
-  --max_exemplars 16 \
+  --max_exemplars 20 \
   --exemplar_selection herding \
   --training_mode last_layer \
   --full_model_acc "$LLMV3_BASE_16_ACC" \

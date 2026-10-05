@@ -35,7 +35,7 @@ OCR_DATA_PATH="/home/woody/iwi5/iwi5280h/dataset/small_dataset_ocr_texts_trocr.p
 mkdir -p $OUTPUT_DIR
 mkdir -p logs
 
-$DATA_DIR="/home/woody/iwi5/iwi5280h/dataset/small_dataset"
+DATA_DIR="/home/woody/iwi5/iwi5280h/dataset/small_dataset"
 
 # Multi-GPU configuration
 WORLD_SIZE=4  # Number of GPUs
@@ -72,7 +72,7 @@ echo "  Classes: $CLASSES"
 echo " ============================== "
 
 python src/base_models/sota_eaml_model_multipros.py \
-    --data_dir /home/woody/iwi5/iwi5280h/dataset/small_dataset\
+    --data_dir "$DATA_DIR" \
     --ocr_data_path $OCR_DATA_PATH \
     --output_dir $OUTPUT_DIR \
     --classes $CLASSES \

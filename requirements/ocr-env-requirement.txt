@@ -7,8 +7,6 @@ certifi==2025.7.14
 cffi==1.17.1
 charset-normalizer==3.4.2
 click==8.2.1
-docling-core==2.40.0
-docling-ocr==0.1.0
 filelock==3.13.1
 fsspec==2024.6.1
 h2==4.2.0
@@ -38,7 +36,6 @@ pysocks==1.7.1
 pytesseract==0.3.13
 python-dateutil==2.9.0.post0
 python-tzdata==2025.2
-qwen-vl-utils==0.0.11
 referencing==0.36.2
 requests==2.32.4
 rich==14.0.0

@@ -37,7 +37,7 @@ python src/class_incremental/eaml/class_incremental.py \
   --base_model_path "$BASE_MODEL" \
   --model_name eaml \
   --checkpoint_dir "$CKPT_DIR" \
-  --batch_size 32 \
+  --batch_size 64 \
   --lr 1e-3 \
   --num_epochs 100 \
   --strategy distillation \

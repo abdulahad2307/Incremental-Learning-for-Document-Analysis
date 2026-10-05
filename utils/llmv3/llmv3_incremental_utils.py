@@ -82,7 +82,8 @@ class EWC:
                 continue
             if n in self._fisher and p.shape == self._means[n].shape:
                 loss += (self._fisher[n] * (p - self._means[n]).pow(2)).sum()
-        return self.lambda_ewc * loss
+        # EWC (Kirkpatrick et al., 2017): (lambda / 2) * sum_i F_i (theta_i - theta*_i)^2
+        return 0.5 * self.lambda_ewc * loss
 
 
 def distillation_loss(new_logits, old_logits, temperature=2.0, alpha=0.5):

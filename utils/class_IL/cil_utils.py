@@ -7,6 +7,12 @@ import numpy as np
 from typing import Dict, List, Optional, Tuple, Union
 from PIL import Image
 
+from utils.eaml.mutual_learning import MutualLearningLoss
+
+# EAML base-model loss (EAML paper: image/text/fusion CE + truncated-KL mutual learning, beta = 0.5); the IL
+# strategies add their own terms (EWC, KD) on top of it, as for LayoutLMv3 (whose base loss is the CE)
+EAML_BASE_LOSS = MutualLearningLoss(kld_weight=0.5)
+
 class IncrementalStrategy:
     """Base class for incremental learning strategies"""
     def __init__(self, device):
@@ -78,9 +84,10 @@ class StandardIncremental(IncrementalStrategy):
             texts = {k: v.to(self.device) for k, v in texts.items()}
             labels = batch['labels'].to(self.device)
             
-            # Forward pass
-            outputs = model(images=images, texts=texts)
-            logits = outputs
+            # Forward pass (all three EAML heads, for the EAML base loss)
+            outputs = model(images=images, texts=texts, return_features=True)
+            logits = outputs['fusion_logits']
+            loss = EAML_BASE_LOSS(outputs, labels)['total_loss']
         else:  # DocFormer
             inputs = {
                 'pixel_values': batch['pixel_values'].to(self.device),
@@ -91,9 +98,8 @@ class StandardIncremental(IncrementalStrategy):
             labels = batch['labels'].to(self.device)
             outputs = model(**inputs, task="classification")
             logits = outputs['logits']
-            
-        # Classification loss
-        loss = criterion(logits, labels)
+            # Classification loss
+            loss = criterion(logits, labels)
         
         # Adding EWC regularization if available
         if ewc is not None:
@@ -123,11 +129,10 @@ class DistillationIncremental(IncrementalStrategy):
             texts = {k: v.to(self.device) for k, v in texts.items()}
             labels = batch['labels'].to(self.device)
             
-            # Forward pass
-            outputs = model(images=images, texts=texts)
-            logits = outputs
-            # Classification loss
-            cls_loss = criterion(logits, labels)
+            # Forward pass (all three EAML heads, for the EAML base loss); KD uses the fusion logits
+            outputs = model(images=images, texts=texts, return_features=True)
+            logits = outputs['fusion_logits']
+            cls_loss = EAML_BASE_LOSS(outputs, labels)['total_loss']
             
             # Distillation loss if we have an old model
             if old_model is not None:
@@ -274,15 +279,6 @@ class EWC:
             
         self._fisher = fisher
     """   
-    def penalty(self, model: nn.Module) -> torch.Tensor:
-        #Compute EWC penalty for current model parameters
-        loss = 0
-        for n, p in model.named_parameters():
-            if n in self._means:
-                # Compute squared distance between current and stored parameters
-                # weighted by Fisher information
-                loss += (self._fisher[n] * (p - self._means[n]) ** 2).sum()
-        return self.lambda_ewc * loss
     """
         
     def penalty(self, model: nn.Module) -> torch.Tensor:
@@ -297,7 +293,8 @@ class EWC:
             if n in self._means and p.size() == self._means[n].size():
                 # APplying penalty only if parameter exists and sizes match
                 loss += (self._fisher[n] * (p - self._means[n]) ** 2).sum()
-        return self.lambda_ewc * loss
+        # EWC (Kirkpatrick et al., 2017): (lambda / 2) * sum_i F_i (theta_i - theta*_i)^2
+        return 0.5 * self.lambda_ewc * loss
 
 
     

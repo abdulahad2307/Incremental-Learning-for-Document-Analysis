@@ -42,6 +42,8 @@ python src/domain_incremental/eaml/domain_incremental_reg_evm_training.py \
   --lambda_distill 1.0 \
   --lambda_ewc 5000 \
   --use_ewc \
+  --use_exemplars \
+  --max_exemplars 320 \
   --use_bias_correction \
   --finetune_mode last_layer \
   --unfreeze_depth 2 \

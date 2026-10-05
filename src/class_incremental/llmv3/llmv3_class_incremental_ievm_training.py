@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import gc
 from torch.utils.data import DataLoader, ConcatDataset
 from utils.seed import add_seed_arg, set_seed
+from utils.class_IL.cil_utils import AdaptiveLR
 from utils.llmv3.llmv3_model_loader import load_llmv3_checkpoint
 from utils.llmv3.llmv3_il_common import build_cil_train_loader, add_il_args, make_teacher, distill_term, center_classifier_bias, gil as gil_ratio, fit_evm, evm_open_set_eval
 from utils import run_log
@@ -111,7 +112,7 @@ def main():
         image_dir=args.data_dir,
         split="train", 
         batch_size=args.batch_size,
-        images_per_class=args.max_exemplars,
+        images_per_class=args.exemplar_pool,  # candidate pool for herding and EWC
         seed=args.seed,
     )
     print(f"Base training samples: {len(base_train_loader.dataset)}")
@@ -177,6 +178,10 @@ def main():
     ewc = EWC(model, base_train_loader, device, fisher_n=500, lambda_ewc=args.lambda_ewc) if args.use_ewc else None
 
     optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr, weight_decay=0.01)
+
+    # adaptive lr as in the EAML CIL scripts: lr x0.75 after 3 epochs without val improvement
+
+    lr_sched = AdaptiveLR(optimizer, base_lr=args.lr)
 
     start_epoch = 0
     best_val_acc = 0.0
@@ -274,6 +279,7 @@ def main():
             split_name="Val"
         )
         print(f"Epoch {epoch + 1}: Val Loss {val_loss:.4f}, Val Acc {val_acc:.4f}")
+        lr_sched.step(val_acc)
 
         gil_previous = gil_ratio(val_acc, args.full_model_acc)
         print(f"GIL_PreClass-val:{gil_previous:.4f}")

@@ -38,6 +38,22 @@ class DomainIncrementalStrategy:
         return loss, preds, labels
 
 
+from utils.eaml.mutual_learning import MutualLearningLoss
+
+# EAML base-model loss (EAML paper: image/text/fusion CE + truncated-KL mutual learning, beta = 0.5)
+EAML_BASE_LOSS = MutualLearningLoss(kld_weight=0.5)
+
+
+def base_loss_and_logits(model, images, texts, labels, criterion):
+    """The backbone's own training loss and the prediction logits: for EAML (image and text heads) the EAML base loss
+    on all three heads and the fusion logits; otherwise criterion (cross-entropy) on the model's logits."""
+    if texts is not None and hasattr(model, "image_classifier") and hasattr(model, "text_classifier"):
+        outputs = model(images, texts, return_features=True)
+        return EAML_BASE_LOSS(outputs, labels)['total_loss'], outputs['fusion_logits']
+    logits = model(images, texts) if texts is not None else model(images)
+    return criterion(logits, labels), logits
+
+
 class StandardDomainIL(DomainIncrementalStrategy):
     """
     Standard domain-incremental learning:
@@ -86,9 +102,11 @@ class StandardDomainIL(DomainIncrementalStrategy):
         else:
             raise ValueError("Batch format unsupported")
 
-        logits = self._forward(model, inputs)
-
-        loss = criterion(logits, labels)
+        if isinstance(inputs, dict) and "images" in inputs:
+            loss, logits = base_loss_and_logits(model, inputs["images"], inputs.get("texts"), labels, criterion)
+        else:
+            logits = self._forward(model, inputs)
+            loss = criterion(logits, labels)
         if ewc:
             loss += ewc.penalty(model)
         if bias_reg:
@@ -112,13 +130,12 @@ class DistillationDomainIL(DomainIncrementalStrategy):
         texts = None
         if "texts" in batch and batch["texts"] is not None:
             texts = {k: v.to(self.device) for k, v in batch["texts"].items()}
-        logits = model(images, texts) if texts is not None else model(images)
+        cls_loss, logits = base_loss_and_logits(model, images, texts, labels, criterion)
         old_logits = None
         if old_model:
             with torch.no_grad():  # frozen teacher
                 old_logits = old_model(images, texts) if texts is not None else old_model(images)
 
-        cls_loss = criterion(logits, labels)
         dist_loss = 0.0
         if old_logits is not None:
             old_num_classes = old_logits.size(1)
@@ -185,7 +202,8 @@ class EWC:
                 continue
             if n in self._means and p.shape == self._means[n].shape:
                 loss += (self._fisher[n] * (p - self._means[n]) ** 2).sum()
-        return self.lambda_ewc * loss
+        # EWC (Kirkpatrick et al., 2017): (lambda / 2) * sum_i F_i (theta_i - theta*_i)^2
+        return 0.5 * self.lambda_ewc * loss
     
 
 # ----------- Exemplar Management -----------
@@ -306,15 +324,17 @@ class AdaptiveLR:
         else:
             self.counter += 1
             if self.counter >= self.patience:
-                self.base_lr = max(self.base_lr * self.factor, self.min_lr)
+                # Decay the optimizer's current lr (base_lr is only a default and may not be the lr in use,
+                # e.g. 1e-3 here vs. --lr 1e-4: deriving the new lr from it raised the lr instead of lowering it)
                 for param_group in self.optimizer.param_groups:
-                    param_group['lr'] = self.base_lr
+                    param_group['lr'] = max(param_group['lr'] * self.factor, self.min_lr)
+                self.base_lr = self.optimizer.param_groups[0]['lr']
                 self.counter = 0
                 return True
         return False
 
     def get_lr(self):
-        return self.base_lr
+        return self.optimizer.param_groups[0]['lr']
 
 
 # ----------- Feature Extraction -----------

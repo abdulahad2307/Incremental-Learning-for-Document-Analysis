@@ -7,6 +7,7 @@ import gc
 import numpy as np
 from torch.utils.data import DataLoader, ConcatDataset
 from utils.seed import add_seed_arg, set_seed
+from utils.domain_IL.dil_utils import AdaptiveLR
 from utils.llmv3.llmv3_model_loader import load_llmv3_checkpoint
 from utils.llmv3.llmv3_il_common import add_il_args, make_teacher, distill_term, center_classifier_bias, gil as gil_ratio, fit_evm, evm_open_set_eval
 from utils import run_log
@@ -167,7 +168,7 @@ def main():
         image_dir=base_data_dir,
         split="train",
         batch_size=args.batch_size,
-        images_per_class=args.max_exemplars,
+        images_per_class=args.exemplar_pool,  # candidate pool for herding and EWC
         seed=args.seed,
     )
     print(f"Base domain training samples: {len(base_train_loader.dataset)}")
@@ -197,7 +198,7 @@ def main():
         image_dir=base_data_dir,
         split="val",
         batch_size=args.batch_size,
-        images_per_class=1250,
+        images_per_class=None,  # full split (same as EAML)
         seed=args.seed,
     )
     print(f"Base domain val samples: {len(base_val_loader.dataset)}")
@@ -226,7 +227,7 @@ def main():
         image_dir=base_data_dir,
         split="test",
         batch_size=args.batch_size,
-        images_per_class=1250,
+        images_per_class=None,  # full split (same as EAML)
         seed=args.seed,
     )
     print(f"Base domain test samples: {len(base_test_loader.dataset)}")
@@ -263,6 +264,8 @@ def main():
 
     ewc = EWC(model, base_train_loader, device, fisher_n=500, lambda_ewc=args.lambda_ewc) if args.use_ewc else None
     optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr, weight_decay=0.01)
+    # adaptive lr as in the EAML DIL scripts: lr x0.7 after 3 epochs without val improvement
+    lr_sched = AdaptiveLR(optimizer)
 
     start_epoch = 0
     best_val_acc = 0.0
@@ -408,6 +411,7 @@ def main():
 
         # Save best model based on combined accuracies or your preferred metric
         combined_acc = (val_acc_base + val_acc_inc) / 2
+        lr_sched.step({'accuracy': combined_acc})
         if combined_acc > best_val_acc:
             best_val_acc = combined_acc
             save_path = os.path.join(args.checkpoint_dir, f"layoutlmv3_domain_incremental_evm_ood_best.pt")

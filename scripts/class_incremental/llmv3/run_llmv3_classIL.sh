@@ -45,7 +45,7 @@ python src/class_incremental/llmv3/llmv3_class_incremental.py \
   --lambda_ewc 5000.0 \
   --strategy "$STRATEGY" \
   --use_bias_correction \
-  --max_exemplars 320 \
+  --max_exemplars 20 \
   --exemplar_selection herding \
   --training_mode last_layer \
   --base_model_acc "$LLMV3_BASE_11_ACC" \

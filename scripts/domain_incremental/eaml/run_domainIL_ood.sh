@@ -43,6 +43,8 @@ python src/domain_incremental/eaml/domain_incremental_ood.py \
   --lambda_distill 1.0 \
   --lambda_ewc 5000.0 \
   --use_ewc \
+  --use_exemplars \
+  --max_exemplars 320 \
   --unfreeze_depth 2 \
   --patience 10 \
   --use_bias_correction \

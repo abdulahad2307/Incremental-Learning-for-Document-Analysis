@@ -5,6 +5,8 @@ from PIL import Image, UnidentifiedImageError
 import torchvision.transforms as T
 import random
 
+from utils.data_subset import select_per_class
+
 
 def poly8_to_bbox4(poly):
     xs = poly[0::2]
@@ -35,14 +37,12 @@ class OCRTensorsDataset(Dataset):
                 self.ocr_map[str(im_path).lower()] = entry
 
         self.samples = []
-        random.seed(seed)
         for c in classes:
             class_dir = self.image_dir / c
             if not class_dir.exists():
                 continue
-            images = list(class_dir.glob("*.*"))
-            if images_per_class:
-                images = random.sample(images, min(images_per_class, len(images)))
+            # reproducible per-class subset, the same documents as the EAML base model (utils/data_subset.py)
+            images = [Path(p) for p in select_per_class(class_dir.glob("*.*"), images_per_class, seed, c)]
             for img_path in images:
                 if self.ocr_dir is not None:
                     pt_path = self.ocr_dir / (img_path.stem + ".pt")
@@ -120,7 +120,9 @@ class OCRTensorsDataset(Dataset):
 
 
 def get_dataloaders(dataset_name, ocr_tensor_file, base_classes, image_dir, batch_size=8,
-                    max_length=512, bbox_style="rect", images_per_class=None, seed=42):
+                    max_length=512, bbox_style="rect", images_per_class=None, seed=42, val_image_dir=None):
+    """Train on image_dir (images_per_class per class); validate on val_image_dir (all its images) if given,
+    otherwise on a seeded 80/20 split of image_dir."""
     if dataset_name == "rvl_cdip":
         all_classes = ['letter', 'form', 'email', 'handwritten', 'advertisement', 'scientific_report',
                        'scientific_publication', 'specification', 'file_folder', 'news_article',
@@ -153,10 +155,16 @@ def get_dataloaders(dataset_name, ocr_tensor_file, base_classes, image_dir, batc
         print(f"  {c}: {class_counts.get(c, 0)}")
     
     
-    n_total = len(dataset)
-    n_train = int(0.8 * n_total)
-    n_val = n_total - n_train
-    train_ds, val_ds = random_split(dataset, [n_train, n_val])
+    if val_image_dir is not None:
+        train_ds = dataset
+        val_ds = OCRTensorsDataset(val_image_dir, ocr_tensor_file, classes, max_length, bbox_style,
+                                   images_per_class=None, seed=seed)
+        print(f"Validation: {len(val_ds)} samples from {val_image_dir}")
+    else:
+        n_total = len(dataset)
+        n_train = int(0.8 * n_total)
+        n_val = n_total - n_train
+        train_ds, val_ds = random_split(dataset, [n_train, n_val], generator=torch.Generator().manual_seed(seed))
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
