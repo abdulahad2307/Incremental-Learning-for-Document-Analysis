@@ -25,12 +25,13 @@ source "${SLURM_SUBMIT_DIR:-$PWD}/scripts/config.sh" || exit 1
 STEP=${SLURM_ARRAY_TASK_ID:?submit with: sbatch --array=<step> <script>}
 STRATEGY=${1:-standard}                  # standard | distillation (KD keeps a teacher copy in GPU memory)
 case "$STRATEGY" in standard) STRAT_TAG=std ;; distillation) STRAT_TAG=kd ;; *) echo "ERROR: strategy must be standard|distillation" >&2; exit 1 ;; esac
-CKPT_DIR=$CIL_ROOT/$LLMV3_TAG/ievm_$STRAT_TAG
+CKPT_DIR=$CIL_ROOT/$LLMV3_TAG/ievm_$STRAT_TAG/seed$SEED
 cil_step "$STEP" "$CKPT_DIR" "$LLMV3_BASE_11" "layoutlmv3_cil_incremental_ievm_{class}_best.pt"
 RESUME_CKPT=""                           # resume this step: a checkpoint of this step in $CKPT_DIR
 mkdir -p "$CKPT_DIR"
 
 python src/class_incremental/llmv3/llmv3_class_incremental_ievm_training.py \
+  --seed "$SEED" \
   --data_dir "$RVL_DIR" \
   --ocr_tensor_path "$LLMV3_OCR_RVL" \
   --all_classes "$ALL_CLASSES" \
