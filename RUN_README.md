@@ -151,6 +151,20 @@ Other extraction variants (not used by the pipeline): `run_ocrextractor.sh`, `ru
 
 ### Step 2 — Base models (4 jobs, independent, can run in parallel; need the OCR of step 1)
 
+Each base model is trained as in its paper, with nothing the paper does not specify:
+
+| | EAML (Bakkali et al., 2021) | LayoutLMv3 (Huang et al., 2022) |
+|---|---|---|
+| Input | 229 x 229 images, Tesseract text (BERT, 128 tokens) | 224 x 224 images, 512 tokens + boxes |
+| Augmentation | shift 0.1, shear 0.1, cutout (`RandomErasing`) | none |
+| Optimizer | SGD with Nesterov momentum 0.9, lr 1e-3 halved every 10 epochs, batch 16, **no weight decay** | Adam, fixed lr 2e-5, batch 64 (8 x 8 accumulation) |
+| Length | early stopping on validation loss, patience 10 | 20,000 steps, no early stopping; the best-validation checkpoint is kept |
+| Head | image / text / fusion linear heads, no dropout or feature normalisation | Custom: linear on [CLS]; pre-trained: MLP on [CLS] (dense + tanh, then linear) |
+
+Both use the same documents (12,500 training images per class) and the official validation and test splits. All images are normalised with mean = std = 0.5, as the pretrained image models expect (`utils/image_transforms.py`, shared by base, CIL and DIL loaders). No gradient clipping. Until Oct 2026 EAML used weight decay 0.01, which under SGD erased its pretrained backbones within a few epochs (accuracy fell to chance after epoch 1), plus dropout, L2-normalised features and ImageNet normalisation; LayoutLMv3 used AdamW (weight decay 0.01), early stopping and unnormalised images.
+
+A LayoutLMv3 job that hits the 24 h limit before 20,000 steps resumes from `<output dir>/layoutlmv3_rvl_cdip_last.pt` (set `RESUME_CKPT` and `RESUME_EPOCH` in the launcher).
+
 ```bash
 sbatch scripts/base_models/run_eamlmodel.sh        # 2_base_eaml_11cls  -> $EAML_BASE_11  (CIL base)
 sbatch scripts/base_models/run_eamlmodel_all.sh    # 2_base_eaml_16cls  -> $EAML_BASE_16  (DIL base)
@@ -161,7 +175,7 @@ sbatch --export=LLMV3_MODEL=hf -J 2_base_llmv3hf_11cls scripts/base_models/run_l
 sbatch --export=LLMV3_MODEL=hf -J 2_base_llmv3hf_16cls scripts/base_models/run_llmv3.sh
 ```
 
-When they are done, put their **test accuracies** (last lines of each log) into `EAML_BASE_11_ACC`, `EAML_BASE_16_ACC`, `LLMV3_BASE_11_ACC`, `LLMV3_BASE_16_ACC` (and `LLMV3HF_BASE_11_ACC`, `LLMV3HF_BASE_16_ACC` for the pre-trained LayoutLMv3) in `scripts/config.sh`. Steps 3–4 pass them as `--full_model_acc` / `--base_model_acc`, so G_IL is measured against the base model.
+When they are done, put their **test accuracies** (the last line of each log: "Best checkpoint ...: Test ... accuracy") into `EAML_BASE_11_ACC`, `EAML_BASE_16_ACC`, `LLMV3_BASE_11_ACC`, `LLMV3_BASE_16_ACC` (and `LLMV3HF_BASE_11_ACC`, `LLMV3HF_BASE_16_ACC` for the pre-trained LayoutLMv3) in `scripts/config.sh`. Steps 3–4 pass them as `--full_model_acc` / `--base_model_acc`, so G_IL is measured against the base model.
 
 Then save the base models' **step-0 predictions** (one GPU job per backbone; needed for forgetting / BWT, see Step 5):
 
