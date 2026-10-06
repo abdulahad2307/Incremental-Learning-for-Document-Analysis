@@ -7,7 +7,7 @@ import unittest
 import torch
 
 from tests.fixtures import GLOBAL_CLASSES
-from tests.runner import PipelineTestCase, add_matrix_tests, out_dir, run_script
+from tests.runner import PipelineTestCase, add_matrix_tests, check_predictions, out_dir, run_script
 
 SRC = "src/domain_incremental/llmv3/"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -19,6 +19,10 @@ METHODS = {
     "ievm":    ("llmv3_domain_incremental_ievm_training.py", ["--lambda_evm", 0.1], ["EVM open set test"]),
     "regevm":  ("llmv3_domain_incremental_reg_evm_training.py", ["--lambda_evm", 0.1], ["EVM open set test"]),
 }
+
+# method -> (EVM probabilities, OOD scores) expected in its saved predictions
+SAVES = {"no_evm": (False, False), "evm": (True, False), "evm_ood": (True, True), "ievm": (True, False),
+         "regevm": (True, False), "ood_only": (False, True), "evm_posthoc": (True, False)}
 
 
 def run_method(test, method, strategy):
@@ -34,6 +38,7 @@ def run_method(test, method, strategy):
         "--use_bias_correction", "--training_mode", "last_layer", "--full_model_acc", 0.9, "--device", DEVICE,
     ] + extra, cwd=out, expect_logs=logs)
     test.assertTrue(glob.glob(os.path.join(out, "layoutlmv3_domain_incremental*_best.pt")), f"no best checkpoint in {out}")
+    check_predictions(test, out, "dil", ["rvl", "tobacco"], *SAVES[method])
 
 
 class TestLayoutDIL(PipelineTestCase):
