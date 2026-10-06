@@ -13,7 +13,7 @@
 
 # Step 2 - base model: LayoutLMv3 on the 11 CIL base classes of RVL-CDIP (12,500 images per class, bert-base-uncased OCR).
 # Setup: 12,500 training images per class (the same documents as the EAML base, utils/data_subset.py),
-# official val split; AdamW with a fixed lr of 2e-5, effective batch 64 (8 x 8 accumulation), 20,000 steps (LayoutLMv3 paper).
+# official val split; Adam with a fixed lr of 2e-5, effective batch 64 (8 x 8 accumulation), 20,000 steps (LayoutLMv3 paper).
 # Output: $LLMV3_BASE_11 (read by the LayoutLMv3 class-incremental scripts (step 3)).
 # Submit from the repo root (paths and classes: scripts/config.sh):
 #   sbatch scripts/base_models/run_llmv3_11class.sh                          # Custom LayoutLMv3

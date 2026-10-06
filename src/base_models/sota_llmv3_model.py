@@ -84,9 +84,10 @@ def main():
     print(f"Model: {type(model).__name__} ({args.model_type})")
     model.to(device)
 
-    # LayoutLMv3 paper (Huang et al., 2022), RVL-CDIP fine-tuning: AdamW with a fixed learning rate of 2e-5
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
-    print(f"Optimizer: AdamW, fixed lr={args.lr}; effective batch {args.batch_size * args.grad_accum_steps} "
+    # LayoutLMv3 paper (Huang et al., 2022), RVL-CDIP fine-tuning: Adam with a fixed learning rate of 2e-5 (no weight
+    # decay: torch's AdamW would add its default of 0.01, which the paper does not use)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    print(f"Optimizer: Adam, fixed lr={args.lr}; effective batch {args.batch_size * args.grad_accum_steps} "
           f"({args.batch_size} x {args.grad_accum_steps})" + (f", at most {args.max_steps} steps" if args.max_steps else ""))
     total_steps = 0
 
