@@ -17,6 +17,7 @@ from utils.class_IL.cil_utils import (
 )
 from utils.class_IL.training_modes import get_training_mode
 from utils import run_log
+from utils.eval.predictions import save_predictions
 from utils.il_checks import warn_inactive_terms
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -187,8 +188,6 @@ def run_incremental_learning(
 
         val_loader = get_class_il_loader(model_name, os.path.join(data_root, "val"), current_classes,
                                          batch_size, ocr_data=ocr_tensor_path)
-        test_loader = get_class_il_loader(model_name, os.path.join(data_root, "test"), current_classes,
-                                          batch_size, ocr_data=ocr_tensor_path)
         torch.cuda.empty_cache()
 
         def build_model(num_classes):
@@ -292,17 +291,6 @@ def run_incremental_learning(
                                     "step_best_acc": this_step_best_acc,
                                     "step_best_path": this_step_best_path
                                 })
-                test_metrics = CILMetrics(current_classes)
-                test_result = evaluate(model, test_loader, DEVICE, test_metrics, full_model_acc)
-                run_log.log("step_test", step=unseen_idx + 1, new_class=new_class, epoch=epoch + 1, split="test",
-                            loss=test_result['loss'], acc=test_result['top1_acc'], gil_base=((test_result['top1_acc'] - full_model_acc) / (1 - full_model_acc)) if full_model_acc else None,
-                            class_acc=dict(zip(current_classes, test_result['class_acc'])) if test_result.get('class_acc') is not None else None)
-                print("Class-wise Test Accuracy:")
-                for cls, acc in zip(current_classes, test_result['class_acc']):
-                    print(f"  {cls}: {acc:.4f}")
-                if full_model_acc is not None:
-                    gil = (test_result['top1_acc'] - full_model_acc) / (1 - full_model_acc)
-                    print(f"GIL (wrt base): {gil:.4f}")
             else:
                 this_epochs_no_improve += 1
                 print(f"Patience counter: {this_epochs_no_improve}/{patience}")
@@ -376,6 +364,10 @@ def run_incremental_learning(
         del checkpoint
         torch.cuda.empty_cache()
         final_model.eval()
+        if use_bias_correction and hasattr(final_model, "fusion_classifier"):
+            # Bias correction on the evaluated model: the step checkpoint holds the model before the correction
+            with torch.no_grad():
+                final_model.fusion_classifier.bias -= final_model.fusion_classifier.bias.mean()
 
         train_loader_full = get_class_il_loader(model_name, os.path.join(data_root, "train"),
                                                 learned_classes, batch_size, ocr_data=ocr_tensor_path)
@@ -410,6 +402,14 @@ def run_incremental_learning(
         evaluate_with_metrics("Validation", val_loader_full)
         evaluate_with_metrics("Test", test_loader_full)
 
+        # Per-document predictions of this step: test documents of the learned and of the not-yet-learned classes
+        future_classes = [c for c in all_classes if c not in learned_classes]
+        future_loader = get_class_il_loader(model_name, os.path.join(data_root, "test"), future_classes, batch_size,
+                                            ocr_data=ocr_tensor_path) if future_classes else None
+        save_predictions(final_model, DEVICE, checkpoint_dir, f"cil_{new_class}", learned_classes,
+                         {"seen": (test_loader_full, learned_classes), "unseen": (future_loader, future_classes)},
+                         evm=None, ood_detector=None, new_class=new_class, checkpoint=final_global_best_path)
+
 
 if __name__ == "__main__":
     import argparse
@@ -441,7 +441,7 @@ if __name__ == "__main__":
     p.add_argument('--resume', action='store_true')
     p.add_argument('--resume_checkpoint', type=str, default=None)
     p.add_argument('--global_best_acc', type=float, default=0.0)
-    p.add_argument('--full_model_acc', type=float, default=0.953)
+    p.add_argument('--full_model_acc', type=float, default=None)
     p.add_argument('--weight_decay', type=float, default=0.01)
     #p.add_argument('--test_interval', type=int, default=20)
     p.add_argument('--patience', type=int, default=10)

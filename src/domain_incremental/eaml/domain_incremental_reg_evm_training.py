@@ -1,3 +1,4 @@
+import copy
 import os
 import random
 import torch
@@ -14,6 +15,7 @@ from utils.domain_IL.dil_utils import (
 )
 from utils.domain_IL.dil_model_loader import load_eaml_model_partial, set_finetune_mode
 from utils import run_log
+from utils.eval.predictions import save_predictions
 from utils.evm.evm_classifier_reg import RegularizedEVMClassifier
 from utils.evm.evm_loss import evm_nll_loss
 from utils.il_checks import warn_inactive_terms
@@ -215,6 +217,7 @@ def run_domain_incremental_with_evm_training(
     # Initial EVM fit on seed train
     feature_dict, _, _ = extract_features_for_evm(model, train_loader, DEVICE, global_classes)
     evm_hybrid.fit(feature_dict)
+    best_evm = None  # EVM state at the best model (evm_hybrid changes every epoch)
     if resume and resume_ckpt_path is not None and os.path.exists(resume_ckpt_path):
         print(f"Resuming training from checkpoint: {resume_ckpt_path}")
         checkpoint = torch.load(resume_ckpt_path, map_location=DEVICE)
@@ -278,6 +281,7 @@ def run_domain_incremental_with_evm_training(
         }
         if is_best:
             save_checkpoint_dil(model, optimizer, epoch, os.path.join(checkpoint_dir, "best_model.pth"), extra_data=extra_data)
+            best_evm = copy.deepcopy(evm_hybrid)
         save_epoch_checkpoint_dil(model, optimizer, epoch, checkpoint_dir, is_best=is_best, extra_data=extra_data, max_keep_last=2)
 
         if is_best:
@@ -298,6 +302,7 @@ def run_domain_incremental_with_evm_training(
                 print(f"RegEVM Test accuracy on domain '{domain_name}': {accuracy:.4f}")
         lr_scheduler.step({'accuracy': val_acc, 'loss': val_loss})
     model.load_state_dict(torch.load(best_model_path, map_location=DEVICE, weights_only=False)['model_state_dict'])
+    final_evm = best_evm if best_evm is not None else evm_hybrid  # the EVM fitted with the best model
     
     print("Final evaluation on test datasets:")
 
@@ -309,9 +314,15 @@ def run_domain_incremental_with_evm_training(
 
     print("Final RegEVM evaluation on test datasets:")
     for domain_name, loader in [(pretrained_domain, test_loader_pretrained), (incremental_domain, test_loader_incremental)]:
-        accuracy, _ = evm_evaluate(model, loader, global_classes, evm_hybrid, evm_threshold)
+        accuracy, _ = evm_evaluate(model, loader, global_classes, final_evm, evm_threshold)
         run_log.log("open_set", split=domain_name + " (final)", evm_known_acc=accuracy)
         print(f"Final RegEVM accuracy on domain '{domain_name}': {accuracy:.4f}")
+
+    # Per-document predictions after the domain step (best model), on the test sets of both domains
+    save_predictions(model, DEVICE, checkpoint_dir, "dil", global_classes,
+                     {"rvl": (test_loader_pretrained, global_classes), "tobacco": (test_loader_incremental, global_classes)},
+                     evm=final_evm, ood_detector=None, checkpoint=best_model_path)
+
 
 if __name__ == "__main__":
     import argparse
