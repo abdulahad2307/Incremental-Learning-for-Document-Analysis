@@ -7,6 +7,8 @@ from typing import Dict, List, Optional
 from PIL import Image, UnidentifiedImageError
 from sklearn.model_selection import StratifiedShuffleSplit
 
+from utils.data_subset import split_indices
+
 common_transform = transforms.Compose([
     transforms.Resize((229, 229)),
     transforms.ToTensor(),
@@ -233,22 +235,13 @@ class DILDataLoader:
                     collate_fn=safe_collate,
                 )
             else:
-                full_ds = EAMLDocumentDataset(os.path.join(self.data_root, domain), transform=self.transform, ocr_tensor_dir=ocr_dir, class_to_idx=self.class_to_idx)
-                train_ds, val_ds, test_ds = stratified_split(full_ds)
-                if phase == "train":
-                    ds = train_ds
-                    shuffle = True
-                    drop_last = True
-                elif phase == "val":
-                    ds = val_ds
-                    shuffle = False
-                    drop_last = False
-                elif phase == "test":
-                    ds = test_ds
-                    shuffle = False
-                    drop_last = False
-                else:
+                if phase not in ("train", "val", "test"):
                     continue
+                domain_root = os.path.join(self.data_root, domain)
+                full_ds = EAMLDocumentDataset(domain_root, transform=self.transform, ocr_tensor_dir=ocr_dir, class_to_idx=self.class_to_idx)
+                # Stratified 70/15/15 split by document, shared with LayoutLMv3 (utils/data_subset.split_documents)
+                ds = torch.utils.data.Subset(full_ds, split_indices([p for p, _ in full_ds.samples], domain_root, phase))
+                shuffle = drop_last = (phase == "train")
                 loaders[domain] = DataLoader(
                     ds,
                     batch_size=self.batch_size,
