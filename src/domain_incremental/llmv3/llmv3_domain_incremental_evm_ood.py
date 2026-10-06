@@ -11,6 +11,7 @@ from utils.domain_IL.dil_utils import AdaptiveLR
 from utils.llmv3.llmv3_model_loader import load_llmv3_checkpoint
 from utils.llmv3.llmv3_il_common import add_il_args, make_teacher, distill_term, center_classifier_bias, gil as gil_ratio, fit_evm, evm_open_set_eval
 from utils import run_log
+from utils.eval.predictions import save_predictions
 from utils.evm.evm_loss import evm_nll_loss
 from utils.il_checks import warn_inactive_terms
 from utils.training_scope import set_training_scope
@@ -288,6 +289,7 @@ def main():
     feature_dict, _, _ = extract_features_for_evm(model, inc_train_loader, device, all_classes)
     evm_hybrid = EVMClassifier(tailsize=args.evm_tailsize, cover_threshold=args.evm_threshold)
     evm_hybrid.fit(feature_dict)
+    best_evm = None  # EVM state at the best model (evm_hybrid changes every epoch)
     print("EVM Initialized.")
 
     # ViM behind L_OOD: principal subspace of the pretrained domain, fitted with the model before adaptation
@@ -422,6 +424,7 @@ def main():
                 'best_val_acc': best_val_acc,
             }, save_path)
             print(f"Saved best model checkpoint: {save_path}")
+            best_evm = copy.deepcopy(evm_hybrid)
             patience_counter = 0
         else:
             patience_counter += 1
@@ -434,6 +437,7 @@ def main():
     best_path = os.path.join(args.checkpoint_dir, f"layoutlmv3_domain_incremental_evm_ood_best.pt")
     best_ckpt = torch.load(best_path, map_location=device)
     model.load_state_dict(best_ckpt['model_state_dict'])
+    final_evm = best_evm if best_evm is not None else evm_hybrid  # the EVM fitted with the best model
     if args.use_bias_correction:
         center_classifier_bias(model)
     model.eval()
@@ -453,19 +457,26 @@ def main():
     print(f"Final Tobacco-3482 Test Loss: {test_loss_inc:.4f}, Accuracy: {test_acc_inc:.4f}, F1: {test_f1_inc:.4f}")
 
     # EVM open set on both domains' test sets: classes the EVM was never fitted on are the unknowns
-    evm_open_set_eval(evm_hybrid, model, device, base_test_loader, all_classes, inc_test_loader, all_classes, tag="EVM open set test")
+    evm_open_set_eval(final_evm, model, device, base_test_loader, all_classes, inc_test_loader, all_classes, tag="EVM open set test")
 
     # Domain-shift detection: pretrained domain = in-distribution, incremental domain = OOD,
     # for the base model (before adaptation) and the adapted best model
     base_eval, _ = load_llmv3_checkpoint(args.base_model_path, base_num_classes, device)
     for label, eval_model in [("before adaptation", base_eval), ("after adaptation", model)]:
+        ood_detector = make_detector(args.ood_method)
         evaluate_ood(
-            make_detector(args.ood_method), eval_model, device,
+            ood_detector, eval_model, device,
             fit_loader=rvl_fit_loader, calib_loader=base_val_loader, id_loader=base_test_loader, ood_loader=inc_test_loader,
             tpr=args.ood_tpr, max_per_class=args.ood_max_per_class,
             tag=f"Domain shift RVL-CDIP -> Tobacco-3482, {label}",
             savepath=os.path.join(args.checkpoint_dir, f"ood_{args.ood_method}_domain_shift_{label.split()[0]}.png"),
         )
+
+    # Per-document predictions after the domain step (best model), on the test sets of both domains
+    save_predictions(model, device, args.checkpoint_dir, "dil", all_classes,
+                     {"rvl": (base_test_loader, all_classes), "tobacco": (inc_test_loader, all_classes)},
+                     evm=final_evm, ood_detector=ood_detector, checkpoint=best_path)
+
 
 if __name__ == "__main__":
     main()

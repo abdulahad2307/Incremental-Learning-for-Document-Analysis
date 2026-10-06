@@ -10,6 +10,7 @@ from utils.class_IL.cil_utils import AdaptiveLR
 from utils.llmv3.llmv3_model_loader import load_llmv3_checkpoint
 from utils.llmv3.llmv3_il_common import build_cil_train_loader, add_il_args, make_teacher, distill_term, center_classifier_bias, gil as gil_ratio, fit_evm, evm_open_set_eval
 from utils import run_log
+from utils.eval.predictions import save_predictions
 from utils.evm.evm_loss import evm_nll_loss
 from utils.evm.evm_state import load_open_set_state, save_open_set_state
 from utils.il_checks import warn_inactive_terms
@@ -130,7 +131,6 @@ def main():
     )
     print(f"Unseen class samples (limited): {len(unseen_train_loader.dataset)}")
 
-    val_test_img = 1250
     print("Loading validation data .....")
     val_loader = get_incremental_dataloader(
         dataset_name=args.dataset_name,
@@ -140,7 +140,7 @@ def main():
         image_dir=args.data_dir,
         split="val",
         batch_size=args.batch_size,
-        images_per_class=val_test_img,
+        images_per_class=None,
         seed=args.seed,
     )
     print(f"Validation samples: {len(val_loader.dataset)}")
@@ -154,7 +154,7 @@ def main():
         image_dir=args.data_dir,
         split="test",
         batch_size=args.batch_size,
-        images_per_class=val_test_img,
+        images_per_class=None,
         seed=args.seed,
     )
     print(f"Test samples: {len(test_loader.dataset)}")
@@ -339,9 +339,20 @@ def main():
     ood_test_loader = get_incremental_dataloader(
         dataset_name=args.dataset_name, ocr_tensor_file=args.ocr_tensor_path, classes=future_classes,
         label_classes=all_classes, image_dir=args.data_dir, split="test", batch_size=args.batch_size,
-        images_per_class=val_test_img, seed=args.seed,
+        images_per_class=None, seed=args.seed,
     ) if future_classes else None
     evm_open_set_eval(evm, model, device, test_loader, label_space, ood_test_loader, all_classes, tag="EVM open set test")
+
+    # ---------- Per-document predictions of this step: test documents of the learned and not-yet-learned classes ----------
+    future_classes = [c for c in all_classes if c not in label_space]
+    future_loader = get_incremental_dataloader(
+        dataset_name=args.dataset_name, ocr_tensor_file=args.ocr_tensor_path, classes=future_classes,
+        label_classes=future_classes, image_dir=args.data_dir, split="test", batch_size=args.batch_size,
+        images_per_class=None, seed=args.seed,
+    ) if future_classes else None
+    save_predictions(model, device, args.checkpoint_dir, f"cil_{unseen_classes[-1]}", label_space,
+                     {"seen": (test_loader, label_space), "unseen": (future_loader, future_classes)},
+                     evm=evm, ood_detector=None, new_class=unseen_classes[-1], checkpoint=best_path)
 
 if __name__ == "__main__":
     main()

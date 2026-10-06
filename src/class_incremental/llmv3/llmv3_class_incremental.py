@@ -10,6 +10,7 @@ from utils.class_IL.cil_utils import AdaptiveLR
 from utils.llmv3.llmv3_model_loader import load_llmv3_checkpoint
 from utils.llmv3.llmv3_il_common import build_cil_train_loader, add_il_args, make_teacher, distill_term, center_classifier_bias, gil as gil_ratio
 from utils import run_log
+from utils.eval.predictions import save_predictions
 from utils.il_checks import warn_inactive_terms
 from utils.training_scope import set_training_scope
 from utils.llmv3.llmv3_incremental_dataloader import get_incremental_dataloader
@@ -116,7 +117,6 @@ def main():
     )
     print(f"Unseen class samples (limited): {len(unseen_train_loader.dataset)}")
 
-    val_test_img = 1250
     print("Loading validation data .....")
     val_loader = get_incremental_dataloader(
         dataset_name=args.dataset_name,
@@ -126,7 +126,7 @@ def main():
         image_dir=args.data_dir,
         split="val",
         batch_size=args.batch_size,
-        images_per_class=val_test_img,
+        images_per_class=None,
         seed=args.seed,
     )
     print(f"Validation samples: {len(val_loader.dataset)}")
@@ -140,7 +140,7 @@ def main():
         image_dir=args.data_dir,
         split="test",
         batch_size=args.batch_size,
-        images_per_class=val_test_img,
+        images_per_class=None,
         seed=args.seed,
     )
     print(f"Test samples: {len(test_loader.dataset)}")
@@ -323,6 +323,17 @@ def main():
     run_log.log("final", split="Test", loss=test_loss, acc=test_acc, precision=test_p, recall=test_r, f1=test_f1,
                 gil_base=gil_base, gil_prev=test_gil, class_acc=test_class_acc)
     print(f"\nGIL_Base-Test:{gil_base:.4f}")
+
+    # ---------- Per-document predictions of this step: test documents of the learned and not-yet-learned classes ----------
+    future_classes = [c for c in all_classes if c not in label_space]
+    future_loader = get_incremental_dataloader(
+        dataset_name=args.dataset_name, ocr_tensor_file=args.ocr_tensor_path, classes=future_classes,
+        label_classes=future_classes, image_dir=args.data_dir, split="test", batch_size=args.batch_size,
+        images_per_class=None, seed=args.seed,
+    ) if future_classes else None
+    save_predictions(model, device, args.checkpoint_dir, f"cil_{unseen_classes[-1]}", label_space,
+                     {"seen": (test_loader, label_space), "unseen": (future_loader, future_classes)},
+                     evm=None, ood_detector=None, new_class=unseen_classes[-1], checkpoint=best_path)
 
 if __name__ == "__main__":
     main()
