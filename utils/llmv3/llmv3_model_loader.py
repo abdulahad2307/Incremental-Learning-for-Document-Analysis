@@ -148,13 +148,17 @@ LayoutLMv3 = CustomLayoutLMv3
 
 class HFLayoutLMv3(nn.Module):
     """Pre-trained LayoutLMv3 (microsoft/layoutlmv3-base) with the same interface as CustomLayoutLMv3:
-    forward(input_ids, bbox, attention_mask, pixel_values) -> logits, forward_features / extract_features -> [CLS]
-    features, and a plain nn.Linear `classifier` on the [CLS] token (so classifier expansion, bias correction and
-    the OOD detectors work unchanged).
+    forward(input_ids, bbox, attention_mask, pixel_values) -> logits, forward_features / extract_features -> document
+    features, and a plain nn.Linear `classifier` (so classifier expansion, bias correction and the OOD detectors work
+    unchanged).
+
+    Classification head as in the LayoutLMv3 paper (an MLP on the [CLS] token) and Hugging Face's
+    LayoutLMv3ForSequenceClassification: dropout -> dense -> tanh -> dropout -> linear. The tanh output is the
+    document feature; `classifier` is the final linear layer.
 
     Inputs: LayoutLMv3 tokenizer ids (RoBERTa vocabulary, from tools/ocr/ocr_extraction_bbox_layoutlmv3.py), one
-    [x0, y0, x1, y1] box per token in 0-1000, and pixel_values in [0, 1] (as the dataloaders produce them); the
-    images are normalised here with the LayoutLMv3 image-processor mean/std of 0.5."""
+    [x0, y0, x1, y1] box per token in 0-1000, and pixel_values already normalised with mean = std = 0.5 by the
+    data loaders (utils/image_transforms.py), as the LayoutLMv3 image processor does."""
 
     model_type = "hf"
 
@@ -164,6 +168,7 @@ class HFLayoutLMv3(nn.Module):
         self.backbone = LayoutLMv3Model.from_pretrained(hf_model_name)
         hidden_size = self.backbone.config.hidden_size
         self.dropout = nn.Dropout(dropout)
+        self.dense = nn.Linear(hidden_size, hidden_size)  # MLP head on [CLS] (dense + tanh), then `classifier`
         self.classifier = nn.Linear(hidden_size, num_labels)
 
     def _check_inputs(self, input_ids, bbox):
@@ -179,12 +184,11 @@ class HFLayoutLMv3(nn.Module):
     def _encode(self, input_ids, bbox, attention_mask, pixel_values):
         self._check_inputs(input_ids, bbox)
         out = self.backbone(input_ids=input_ids, bbox=bbox.long().clamp(0, 1000), attention_mask=attention_mask,
-                            pixel_values=(pixel_values - 0.5) / 0.5)
+                            pixel_values=pixel_values)
         return out.last_hidden_state  # (B, seq_len + 1 + num_patches, hidden)
 
     def forward(self, input_ids, bbox, attention_mask, pixel_values):
-        cls_token = self._encode(input_ids, bbox, attention_mask, pixel_values)[:, 0]
-        return self.classifier(self.dropout(cls_token))
+        return self.classifier(self.dropout(self.forward_features(input_ids, bbox, attention_mask, pixel_values)))
 
     @torch.no_grad()
     def extract_features(self, input_ids, bbox, attention_mask, pixel_values):
@@ -192,8 +196,9 @@ class HFLayoutLMv3(nn.Module):
         return self.forward_features(input_ids, bbox, attention_mask, pixel_values)
 
     def forward_features(self, input_ids, bbox, attention_mask, pixel_values):
-        """[CLS] features before the classifier layer (keeps the autograd graph, for losses on features)."""
-        return self._encode(input_ids, bbox, attention_mask, pixel_values)[:, 0]
+        """Document features before the classifier layer: tanh(dense(dropout([CLS]))) (keeps the autograd graph)."""
+        cls_token = self._encode(input_ids, bbox, attention_mask, pixel_values)[:, 0]
+        return torch.tanh(self.dense(self.dropout(cls_token)))
 
 
 def build_llmv3_model(model_type="custom", num_labels=16, text_model_name="bert-base-uncased",

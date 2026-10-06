@@ -8,12 +8,12 @@ import torch
 from transformers import BertTokenizer
 
 from utils.llmv3.llmv3_data_loader import get_dataloaders, CILLayoutLMv3Dataset, layoutlmv3_cil_collate_fn
+from utils.image_transforms import normalize
 
 common_transform = transforms.Compose([
     transforms.Resize((229, 229)),
     transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                         std=[0.229, 0.224, 0.225])
+    normalize()
 ])
 
 def _normalize_class_name(name):

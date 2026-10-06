@@ -1,8 +1,8 @@
 #!/bin/bash -l
 
 #SBATCH --job-name=il_pipeline_tests        # Job name
-#SBATCH --output=logs/%x_%j.out            # Standard output log
-#SBATCH --error=logs/%x_%j.err             # Error log
+#SBATCH --output=logs/tests/%x_%j.out      # Standard output log
+#SBATCH --error=logs/tests/%x_%j.err       # Error log
 #SBATCH --partition=v100                   # GPU partition
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -25,6 +25,10 @@ export http_proxy=http://proxy:80
 export https_proxy=http://proxy:80
 
 REPO=${SLURM_SUBMIT_DIR:-$PWD}   # repo root: submit from it (cd <repo> && sbatch scripts/tests/run_pipeline_tests.sh)
+# Model cache settings (HF_HOME on woody, no xet downloads) as for the training jobs; the tests must not write to the
+# real results table, so IL_RESULTS_TABLE is dropped (the runner then uses $PIPELINE_TEST_DIR/il_pipeline_tests/il_runs.csv)
+source "$REPO/scripts/config.sh" || exit 1
+unset IL_RESULTS_TABLE
 export PYTHONPATH=$REPO:$PYTHONPATH
 export PIPELINE_TEST_DIR=${PIPELINE_TEST_DIR:-$TMPDIR}   # node-local disk: synthetic data + ~3 GB of test checkpoints
 cd $REPO

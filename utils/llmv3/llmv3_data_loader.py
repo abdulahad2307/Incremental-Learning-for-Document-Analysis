@@ -6,6 +6,7 @@ import torchvision.transforms as T
 import random
 
 from utils.data_subset import select_per_class
+from utils.image_transforms import normalize
 
 
 def poly8_to_bbox4(poly):
@@ -24,7 +25,8 @@ class OCRTensorsDataset(Dataset):
         self.bbox_style = bbox_style
         self.transform = T.Compose([
             T.Resize((224, 224)),
-            T.ToTensor()
+            T.ToTensor(),
+            normalize(),
         ])
 
         # OCR source: a directory of per-image <stem>.pt files, or one combined file (list of entries with image_path)
@@ -119,10 +121,8 @@ class OCRTensorsDataset(Dataset):
             return tensor
 
 
-def get_dataloaders(dataset_name, ocr_tensor_file, base_classes, image_dir, batch_size=8,
-                    max_length=512, bbox_style="rect", images_per_class=None, seed=42, val_image_dir=None):
-    """Train on image_dir (images_per_class per class); validate on val_image_dir (all its images) if given,
-    otherwise on a seeded 80/20 split of image_dir."""
+def dataset_classes(dataset_name, base_classes=None):
+    """Class list of a dataset in label order, restricted to base_classes if given."""
     if dataset_name == "rvl_cdip":
         all_classes = ['letter', 'form', 'email', 'handwritten', 'advertisement', 'scientific_report',
                        'scientific_publication', 'specification', 'file_folder', 'news_article',
@@ -136,11 +136,24 @@ def get_dataloaders(dataset_name, ocr_tensor_file, base_classes, image_dir, batc
     else:
         raise ValueError(f"Unsupported dataset {dataset_name}")
 
-    if base_classes:
-        classes = [c for c in all_classes if c in base_classes]
-    else:
-        classes = all_classes
+    return [c for c in all_classes if c in base_classes] if base_classes else all_classes
 
+
+def get_test_loader(dataset_name, ocr_tensor_file, base_classes, test_image_dir, batch_size=8, max_length=512,
+                    bbox_style="rect", seed=42):
+    """All images of test_image_dir, with the same classes and label order as get_dataloaders."""
+    classes = dataset_classes(dataset_name, base_classes)
+    test_ds = OCRTensorsDataset(test_image_dir, ocr_tensor_file, classes, max_length, bbox_style,
+                                images_per_class=None, seed=seed)
+    print(f"Test: {len(test_ds)} samples from {test_image_dir}")
+    return DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
+
+
+def get_dataloaders(dataset_name, ocr_tensor_file, base_classes, image_dir, batch_size=8,
+                    max_length=512, bbox_style="rect", images_per_class=None, seed=42, val_image_dir=None):
+    """Train on image_dir (images_per_class per class); validate on val_image_dir (all its images) if given,
+    otherwise on a seeded 80/20 split of image_dir."""
+    classes = dataset_classes(dataset_name, base_classes)
     print(f"Using classes: {classes}")
     dataset = OCRTensorsDataset(image_dir, ocr_tensor_file, classes, max_length, bbox_style,
                                images_per_class=images_per_class, seed=seed)
@@ -182,7 +195,8 @@ class CILLayoutLMv3Dataset(Dataset):
         self.bbox_style = bbox_style
         self.transform = T.Compose([
             T.Resize((224, 224)),
-            T.ToTensor()
+            T.ToTensor(),
+            normalize(),
         ])
 
         self.ocr_data = torch.load(ocr_tensor_file)

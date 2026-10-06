@@ -10,6 +10,7 @@ from utils.domain_IL.dil_utils import AdaptiveLR
 from utils.llmv3.llmv3_model_loader import load_llmv3_checkpoint
 from utils.llmv3.llmv3_il_common import add_il_args, make_teacher, distill_term, center_classifier_bias, gil as gil_ratio
 from utils import run_log
+from utils.eval.predictions import save_predictions
 from utils.il_checks import warn_inactive_terms
 from utils.training_scope import set_training_scope
 from utils.llmv3.llmv3_incremental_dataloader import get_incremental_dataloader
@@ -340,6 +341,11 @@ def main():
                 class_acc_rvl=test_class_acc_base, class_acc_tob=test_class_acc_inc)
     print(f"Final RVL-CDIP Test Loss: {test_loss_base:.4f}, Accuracy: {test_acc_base:.4f}, F1: {test_f1_base:.4f}, G_IL-previous={test_gil_base:.4f}")
     print(f"Final Tobacco-3482 Test Loss: {test_loss_inc:.4f}, Accuracy: {test_acc_inc:.4f}, F1: {test_f1_inc:.4f}, G_IL-previous={test_gil_inc:.4f}")
+
+    # Per-document predictions after the domain step (best model), on the test sets of both domains
+    save_predictions(model, device, args.checkpoint_dir, "dil", all_classes,
+                     {"rvl": (base_test_loader, all_classes), "tobacco": (inc_test_loader, all_classes)},
+                     evm=None, ood_detector=None, checkpoint=best_path)
 
 
 if __name__ == "__main__":

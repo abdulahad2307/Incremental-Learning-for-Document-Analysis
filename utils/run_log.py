@@ -8,7 +8,7 @@ run's seed and the git commit of the code (with "-dirty" if tracked files had un
 
 Row phases:
   epoch      - one per training epoch (train/val loss and accuracy)
-  step_test  - test evaluation of a new best model within an incremental step
+  step_test  - test evaluation of a new best model within a DIL step (EAML DIL scripts)
   open_set   - EVM open-set evaluation (known accuracy / unknown rejection)
   ood        - OOD detector evaluation (logged by utils.ood.ood_eval.evaluate_ood)
   final      - evaluation of the final model (one row per split / domain)

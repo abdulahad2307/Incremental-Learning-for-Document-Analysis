@@ -44,8 +44,11 @@ RVL_NUM_IMAGES=399829                       # images in $RVL_DIR; the merged EAM
 # ---------------- Outputs of this pipeline ----------------
 RUN_ROOT=/home/woody/iwi5/iwi5280h/il_runs
 BASE_ROOT=$RUN_ROOT/base                    # step 2: <backbone>_<n>cls/
-CIL_ROOT=$RUN_ROOT/cil                      # step 3: <backbone>/<method>_<strategy>/
-DIL_ROOT=$RUN_ROOT/dil                      # step 4: <backbone>/<method>_<strategy>/
+CIL_ROOT=$RUN_ROOT/cil                      # step 3: <backbone>/<method>_<strategy>/seed<SEED>/
+DIL_ROOT=$RUN_ROOT/dil                      # step 4: <backbone>/<method>_<strategy>/seed<SEED>/
+# Seed of the incremental runs (steps 3-4); every seed has its own checkpoint folder. Data splits do not depend on it.
+# Repeat a run with another seed: sbatch --export=SEED=1 <script> ...   (with LLMV3_MODEL: --export=SEED=1,LLMV3_MODEL=hf)
+SEED=${SEED:-42}
 export IL_RESULTS_TABLE=$RUN_ROOT/il_runs.csv   # one table with every IL run (utils/run_log.py)
 
 # Base checkpoints written by step 2 and read by steps 3-4
@@ -115,5 +118,6 @@ cil_step() {
         BASE_MODEL=$ckpt_dir/${pattern//\{class\}/${CIL_ORDER[step - 2]}}
         require_file "$BASE_MODEL" "finish CIL step $((step - 1)) first"
     fi
+    export IL_STEP=$step                 # recorded in the saved predictions (utils/eval/predictions.py)
     echo "CIL step $step: adding '$UNSEEN_CLASSES' to $BASE_MODEL"
 }

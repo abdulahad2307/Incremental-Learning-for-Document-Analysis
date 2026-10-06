@@ -30,7 +30,6 @@ def evaluate_model_on_test():
     model = EAMLModel(
         num_classes=len(all_class_list),
         embed_dim=512,    # Must match what was used in training
-        dropout_rate=0.2, # Must match training config
         freeze_image_encoder=False
     )
     model.to(device)

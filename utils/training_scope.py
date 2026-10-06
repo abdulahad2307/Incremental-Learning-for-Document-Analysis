@@ -4,7 +4,7 @@
   last_layer      : the model's last feature layer + the classifier heads
                     EAML -> output projections of the image and text encoders (their sum is the fused
                     feature), Custom LayoutLMv3 -> last fusion-transformer layer,
-                    HF LayoutLMv3 -> last encoder layer
+                    HF LayoutLMv3 -> last encoder layer + the dense layer of its MLP head
   full            : all parameters
 """
 HEAD_NAMES = ("classifier", "image_classifier", "text_classifier", "fusion_classifier")
@@ -17,8 +17,8 @@ def last_feature_layer_prefixes(model):
         return ["image_encoder.model.classif.", "text_encoder.fc."]
     if hasattr(model, "fusion_transformer"):  # Custom LayoutLMv3: [CLS] of the last fusion layer
         return [f"fusion_transformer.layers.{len(model.fusion_transformer.layers) - 1}."]
-    if hasattr(model, "backbone") and hasattr(model.backbone, "encoder"):  # HF LayoutLMv3: last encoder layer
-        return [f"backbone.encoder.layer.{len(model.backbone.encoder.layer) - 1}."]
+    if hasattr(model, "backbone") and hasattr(model.backbone, "encoder"):  # HF LayoutLMv3: last encoder layer + MLP head
+        return [f"backbone.encoder.layer.{len(model.backbone.encoder.layer) - 1}.", "dense."]
     raise ValueError(f"No last-layer definition for {type(model).__name__}")
 
 

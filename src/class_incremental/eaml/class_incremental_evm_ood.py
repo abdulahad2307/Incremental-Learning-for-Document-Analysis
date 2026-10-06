@@ -24,6 +24,7 @@ from utils.class_IL.cil_utils import (
 )
 from utils.class_IL.training_modes import get_training_mode
 from utils import run_log
+from utils.eval.predictions import save_predictions
 from utils.evm.evm_classifier import EVMClassifier
 from utils.evm.evm_eval import evm_openset_metrics
 from utils.evm.evm_viz import plot_openset_histograms
@@ -312,8 +313,6 @@ def run_incremental_learning_evm_ood(
                                                batch_size, ocr_data=ocr_tensor_path)
         val_loader = get_class_il_loader(model_name, os.path.join(data_root, "val"), current_classes,
                                          batch_size, ocr_data=ocr_tensor_path)
-        test_loader = get_class_il_loader(model_name, os.path.join(data_root, "test"), current_classes,
-                                          batch_size, ocr_data=ocr_tensor_path)
         torch.cuda.empty_cache()
 
 
@@ -460,24 +459,6 @@ def run_incremental_learning_evm_ood(
                 )
 
                 
-                test_metrics = CILMetrics(current_classes)
-                test_results = evaluate(model, test_loader, DEVICE, test_metrics, full_model_acc)
-                run_log.log("step_test", step=unseen_idx + 1, new_class=new_class, epoch=epoch + 1, split="test",
-                            loss=test_results['loss'], acc=test_results['top1_acc'], gil_base=((test_results['top1_acc'] - full_model_acc) / (1 - full_model_acc)) if full_model_acc else None,
-                            class_acc=dict(zip(current_classes, test_results['class_acc'])) if test_results.get('class_acc') is not None else None)
-                print("Class-wise Test accuracy:")
-                for c, a in zip(current_classes, test_results["class_acc"]):
-                    print(f"  {c}: {a:.4f}")
-                
-                # ===== GIL =====
-                gil_base = 0.953
-                if full_model_acc is not None:
-                    gil = (test_results['top1_acc'] - full_model_acc) / (1 - full_model_acc)
-                    print(f"GIL: {gil:.4f}")
-                if full_model_acc is not None:
-                    gil = (test_results['top1_acc'] - gil_base) / (1 - gil_base)
-                    print(f"GIL (wrt base): {gil:.4f}")
-
             else:
                 patience_counter += 1
                 print(f"Patience counter: {patience_counter}/{patience}")
@@ -588,6 +569,10 @@ def run_incremental_learning_evm_ood(
         checkpoint = torch.load(final_best_path, map_location=DEVICE,weights_only=False)
         final_model.load_state_dict(checkpoint.get("model_state_dict", checkpoint))
         final_model.eval()
+        if use_bias_correction and hasattr(final_model, "fusion_classifier"):
+            # Bias correction on the evaluated model: the step checkpoint holds the model before the correction
+            with torch.no_grad():
+                final_model.fusion_classifier.bias -= final_model.fusion_classifier.bias.mean()
         torch.cuda.empty_cache()
 
 
@@ -620,6 +605,14 @@ def run_incremental_learning_evm_ood(
         evaluate_print("Train", train_loader_full)
         evaluate_print("Validation", val_loader_full)
         evaluate_print("Test", test_loader_full)
+
+        # Per-document predictions of this step: test documents of the learned and of the not-yet-learned classes
+        future_classes = [c for c in all_classes if c not in learned_classes]
+        future_loader = get_class_il_loader(model_name, os.path.join(data_root, "test"), future_classes, batch_size,
+                                            ocr_data=ocr_tensor_path) if future_classes else None
+        save_predictions(final_model, DEVICE, checkpoint_dir, f"cil_{new_class}", learned_classes,
+                         {"seen": (test_loader_full, learned_classes), "unseen": (future_loader, future_classes)},
+                         evm=evm, ood_detector=ood_detector, new_class=new_class, checkpoint=final_best_path)
 
 
         # All classes are known after the last step; open-set results are reported per step above.
@@ -659,7 +652,7 @@ if __name__ == "__main__":
     p.add_argument('--resume', action='store_true')
     p.add_argument('--resume_checkpoint', type=str, default=None)
     p.add_argument('--global_best_acc', type=float, default=0.0)
-    p.add_argument('--full_model_acc', type=float, default=0.953)
+    p.add_argument('--full_model_acc', type=float, default=None)
     p.add_argument('--weight_decay', type=float, default=0.01)
     p.add_argument('--patience', type=int, default=10)
     p.add_argument('--use_balanced_sampler', action='store_true')

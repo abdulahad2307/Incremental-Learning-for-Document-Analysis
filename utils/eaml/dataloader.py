@@ -9,6 +9,7 @@ from transformers import BertTokenizer
 from typing import Optional, List, Dict
 
 from utils.data_subset import select_per_class, DEFAULT_SEED
+from utils.image_transforms import normalize
 
 class EAML_Dataset(Dataset):
     def __init__(
@@ -182,8 +183,7 @@ class EAML_Dataset(Dataset):
                     fallback_transform = transforms.Compose([
                         transforms.Resize((self.img_size, self.img_size)),
                         transforms.ToTensor(),
-                        transforms.Normalize([0.485, 0.456, 0.406],
-                                             [0.229, 0.224, 0.225])
+                        normalize()
                     ])
                     image = fallback_transform(image)
                     warnings.warn(f"Transform failed for {img_path}: {e}. Used fallback transform.")
@@ -247,8 +247,7 @@ class EAML_DataLoader:
         base_transforms = [
             transforms.Resize((self.img_size, self.img_size)),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                 std=[0.229, 0.224, 0.225])
+            normalize()
         ]
         if train:
             # EAML paper (Sec. 5.3): horizontal/vertical shift of 0.1, shear of 0.1 (Keras shear_range, in degrees)

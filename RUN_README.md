@@ -19,6 +19,7 @@ FAU-Masters_Thesis-Ahad-Extension/
 │   ├── base_models/          Step 2: base classifiers (EAML, LayoutLMv3, DocFormer, CNN baseline)
 │   ├── class_incremental/    Step 3: eaml/run_classIL*.sh, llmv3/run_llmv3_classIL*.sh
 │   ├── domain_incremental/   Step 4: eaml/run_domainIL*.sh, llmv3/run_llmv3_domainIL*.sh
+│   ├── eval/                 run_base_predictions.sh (step-0 predictions of the base models, see Step 2)
 │   └── tests/                run_pipeline_tests.sh (end-to-end tests, see §8)
 ├── logs/                     SLURM logs, one folder per step (created by you, see §3.2)
 ├── src/                      Python entry points (called by scripts/)
@@ -29,8 +30,10 @@ FAU-Masters_Thesis-Ahad-Extension/
 │   └── tests/
 ├── tools/                    Standalone utilities (called by scripts/data_prep or by hand)
 │   ├── data/  ocr/
-│   └── eval/                 Evaluation of trained models; il_results_table.py summarises all IL runs
-├── utils/                    Library code imported as `utils.*` (models, dataloaders, EVM, IL strategies, run_log)
+│   └── eval/                 Evaluation of trained models; il_results_table.py summarises all IL runs,
+│                             base_predictions.py saves the base models' step-0 predictions
+├── utils/                    Library code imported as `utils.*` (models, dataloaders, EVM, IL strategies, run_log,
+│                             eval/predictions.py: per-document predictions of every run)
 └── archive/                  Superseded files kept for reference (not used by any script)
 ```
 
@@ -148,6 +151,20 @@ Other extraction variants (not used by the pipeline): `run_ocrextractor.sh`, `ru
 
 ### Step 2 — Base models (4 jobs, independent, can run in parallel; need the OCR of step 1)
 
+Each base model is trained as in its paper, with nothing the paper does not specify:
+
+| | EAML (Bakkali et al., 2021) | LayoutLMv3 (Huang et al., 2022) |
+|---|---|---|
+| Input | 229 x 229 images, Tesseract text (BERT, 128 tokens) | 224 x 224 images, 512 tokens + boxes |
+| Augmentation | shift 0.1, shear 0.1, cutout (`RandomErasing`) | none |
+| Optimizer | SGD with Nesterov momentum 0.9, lr 1e-3 halved every 10 epochs, batch 16, **no weight decay** | Adam, fixed lr 2e-5, batch 64 (8 x 8 accumulation) |
+| Length | early stopping on validation loss, patience 10 | 20,000 steps, no early stopping; the best-validation checkpoint is kept |
+| Head | image / text / fusion linear heads, no dropout or feature normalisation | Custom: linear on [CLS]; pre-trained: MLP on [CLS] (dense + tanh, then linear) |
+
+Both use the same documents (12,500 training images per class) and the official validation and test splits. All images are normalised with mean = std = 0.5, as the pretrained image models expect (`utils/image_transforms.py`, shared by base, CIL and DIL loaders). No gradient clipping. Until Oct 2026 EAML used weight decay 0.01, which under SGD erased its pretrained backbones within a few epochs (accuracy fell to chance after epoch 1), plus dropout, L2-normalised features and ImageNet normalisation; LayoutLMv3 used AdamW (weight decay 0.01), early stopping and unnormalised images.
+
+A LayoutLMv3 job that hits the 24 h limit before 20,000 steps resumes from `<output dir>/layoutlmv3_rvl_cdip_last.pt` (set `RESUME_CKPT` and `RESUME_EPOCH` in the launcher).
+
 ```bash
 sbatch scripts/base_models/run_eamlmodel.sh        # 2_base_eaml_11cls  -> $EAML_BASE_11  (CIL base)
 sbatch scripts/base_models/run_eamlmodel_all.sh    # 2_base_eaml_16cls  -> $EAML_BASE_16  (DIL base)
@@ -158,7 +175,15 @@ sbatch --export=LLMV3_MODEL=hf -J 2_base_llmv3hf_11cls scripts/base_models/run_l
 sbatch --export=LLMV3_MODEL=hf -J 2_base_llmv3hf_16cls scripts/base_models/run_llmv3.sh
 ```
 
-When they are done, put their **test accuracies** (last lines of each log) into `EAML_BASE_11_ACC`, `EAML_BASE_16_ACC`, `LLMV3_BASE_11_ACC`, `LLMV3_BASE_16_ACC` (and `LLMV3HF_BASE_11_ACC`, `LLMV3HF_BASE_16_ACC` for the pre-trained LayoutLMv3) in `scripts/config.sh`. Steps 3–4 pass them as `--full_model_acc` / `--base_model_acc`, so G_IL is measured against the base model.
+When they are done, put their **test accuracies** (the last line of each log: "Best checkpoint ...: Test ... accuracy") into `EAML_BASE_11_ACC`, `EAML_BASE_16_ACC`, `LLMV3_BASE_11_ACC`, `LLMV3_BASE_16_ACC` (and `LLMV3HF_BASE_11_ACC`, `LLMV3HF_BASE_16_ACC` for the pre-trained LayoutLMv3) in `scripts/config.sh`. Steps 3–4 pass them as `--full_model_acc` / `--base_model_acc`, so G_IL is measured against the base model.
+
+Then save the base models' **step-0 predictions** (one GPU job per backbone; needed for forgetting / BWT, see Step 5):
+
+```bash
+sbatch scripts/eval/run_base_predictions.sh eaml                             # 2_base_predictions
+sbatch scripts/eval/run_base_predictions.sh llmv3
+sbatch --export=LLMV3_MODEL=hf scripts/eval/run_base_predictions.sh llmv3    # after the hf base models
+```
 
 ### Step 3 — Class-incremental learning (needs the two 11-class base models)
 
@@ -351,6 +376,8 @@ sbatch --array=1 scripts/class_incremental/eaml/run_classIL_ood.sh   # 3_cil_eam
 
 One job per method; all are independent and can run in parallel.
 
+Tobacco-3482 has no split folders. Both backbones split it the same way (`utils/data_subset.split_documents`): stratified 70/15/15 by document with a fixed seed of 42, independent of the run's `SEED`, i.e. 2,437 / 522 / 523 documents. So every backbone and every seed is trained and tested on the same Tobacco documents. (Until Oct 2026 LayoutLMv3 used an unstratified 80/10/10 split drawn with the run seed.)
+
 #### 4a. EAML — standard IL, then distillation-based IL
 
 ```bash
@@ -391,7 +418,7 @@ sbatch scripts/domain_incremental/eaml/run_domainIL_ood.sh   # 4_dil_eaml_ood_kd
 ### Step 5 — Results
 
 Every IL job appends its metrics (per epoch, per step, final, open-set and OOD) to `$RUN_ROOT/il_runs.csv`, and its full arguments to `$RUN_ROOT/il_runs_config.jsonl`. Each row also records:
-- the run's **seed**: every script takes `--seed`, default 42. For repeated runs, add `--seed <n>` to the python command in a copy of the launcher.
+- the run's **seed**: `SEED` in `scripts/config.sh`, default 42, passed as `--seed` by every launcher. Repeat a run with another seed by submitting it with `sbatch --export=SEED=<n> ...` (together with the variant: `--export=SEED=<n>,LLMV3_MODEL=hf`); CIL steps of one seed must all use the same `SEED`. Each seed writes to its own folder, `<method>_<strategy>/seed<n>/` under `$CIL_ROOT` / `$DIL_ROOT`, so seeds never overwrite each other's checkpoints. The base models are shared by all seeds; their step-0 predictions (`scripts/eval/run_base_predictions.sh`) do not depend on the seed, since the test splits are fixed.
 - the **git commit** of the code. A `-dirty` suffix means tracked files had uncommitted changes, so commit before running anything that goes into the paper.
 
 Runs that differ only in their seed are kept as separate results. If the table was written by an older version with other columns, jobs stop with an error instead of appending misaligned rows; move the old file aside.
@@ -405,6 +432,30 @@ python tools/eval/il_results_table.py                                  # final r
 python tools/eval/il_results_table.py --backbone eaml --setting CIL --out results_eaml_cil.md
 python tools/eval/il_results_table.py --phase epoch --run-id <run_id>  # training curve of one run
 ```
+
+#### Per-document predictions
+
+Every IL job also saves the per-document outputs of its final model on the test sets, so all metrics (accuracy matrix, forgetting, BWT, open-set AUROC / FPR95 / OSCR, confidence intervals, paired tests between methods) can be computed later without retraining (`utils/eval/predictions.py`):
+
+| Run | File | Test sets in it |
+|---|---|---|
+| CIL step (one array task) | `<checkpoint dir>/predictions/cil_<new class>_seed<seed>.pt` | `seen`: classes learned so far; `unseen`: classes not learned yet (the unknowns of the open-set metrics; absent after the last step) |
+| DIL run | `<checkpoint dir>/predictions/dil_seed<seed>.pt` | `rvl`, `tobacco` |
+| Base model (step 0, `scripts/eval/run_base_predictions.sh`) | `<base model dir>/predictions/base_{cil,dil}_seed<seed>.pt` | CIL: `seen`, `unseen`; DIL: `rvl`, `tobacco` |
+
+Each file is a `torch.save`d dict; load it with `utils.eval.predictions.load_predictions(path)`:
+- `meta`: run_id, git_commit, backbone, setting, method, strategy, bias correction, seed, step (`IL_STEP`, set by `cil_step`), new class, checkpoint.
+- `output_classes`: the model's output classes in logit order; `evm_classes`: the columns of `evm_prob`.
+- `sets[<name>]`, one entry per test document:
+  - `doc_id` (`<class>/<file>`, to pair documents across runs);
+  - `y_true` (index into the set's `class_names`);
+  - `logits`, and `pred` (index into `output_classes`);
+  - EAML also `logits_image` and `logits_text`;
+  - EVM methods `evm_prob`, OOD methods `ood_score` (higher = more in-distribution).
+
+Feature vectors are not stored; the drift analysis will save them for a fixed subsample. In the DIL EVM scripts the EVM is refitted (EVM, RegEVM) or updated (iEVM) after every epoch for L_EVM; the final open-set evaluation and `evm_prob` use its state at the epoch of the best model (until Oct 2026 they used its state after the last epoch).
+
+All validation and test sets are the full splits, for both backbones (LayoutLMv3 CIL used a random 1,250 documents per class, drawn per seed, until Oct 2026). EAML CIL now evaluates the test set once per step, with the step's best model and bias correction; before Oct 2026 it logged a `step_test` row at every validation improvement and its reported results did not include the bias correction.
 
 Stand-alone evaluation of a finished model: `tools/eval/eaml_eval.py`, `tools/eval/sota_llmv3_testing.py`, `tools/eval/verify_model.py`, `src/evaluation/dil_eval.py`, `tools/eval/eaml_eval_dil.py`.
 

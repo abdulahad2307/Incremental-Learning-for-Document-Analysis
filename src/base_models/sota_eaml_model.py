@@ -37,7 +37,7 @@ class EarlyStoppingHandler:
                 print("Early stopping triggered")
 
 class EAMLTrainer:
-    def __init__(self, model,class_list, device=None, learning_rate=1e-3, weight_decay=0.01,
+    def __init__(self, model,class_list, device=None, learning_rate=1e-3, weight_decay=0.0,
                  cls_weight=1.0, kld_weight=0.5, kld_threshold=0.1, optimizer="sgd", momentum=0.9):
         if device is None:
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -52,20 +52,24 @@ class EAMLTrainer:
             threshold=kld_threshold
         )
         self.class_list = class_list
-        # EAML paper (Bakkali et al., 2021, Sec. 5.3): SGD with Nesterov momentum, lr 1e-3 halved every 10 epochs
+        # EAML paper (Bakkali et al., 2021, Sec. 5.3): SGD with Nesterov momentum, lr 1e-3 halved every 10 epochs; it
+        # uses no weight decay. With SGD the decay runs through the momentum buffer: every step shrinks the weights by
+        # lr * wd / (1 - momentum), so wd = 0.01 erased the pretrained BERT / Inception weights within a few epochs
+        # (x0.42 per epoch at batch 16). If decay is set, it acts on weight matrices only, not on biases and norms.
+        decay = [p for p in model.parameters() if p.dim() > 1]
+        no_decay = [p for p in model.parameters() if p.dim() <= 1]
+        param_groups = [{"params": decay, "weight_decay": weight_decay}, {"params": no_decay, "weight_decay": 0.0}]
         if optimizer == "sgd":
             self.optimizer = optim.SGD(
-                model.parameters(),
+                param_groups,
                 lr=learning_rate,
                 momentum=momentum,
                 nesterov=True,
-                weight_decay=weight_decay
             )
         elif optimizer == "adamw":
             self.optimizer = optim.AdamW(
-                model.parameters(),
+                param_groups,
                 lr=learning_rate,
-                weight_decay=weight_decay
             )
         else:
             raise ValueError(f"Unknown optimizer '{optimizer}'; choose sgd or adamw")
@@ -112,15 +116,7 @@ class EAMLTrainer:
             loss_dict = self.criterion(outputs, labels)
             loss = loss_dict['total_loss']
             loss.backward()
-
-            # gradient clipping
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-            
-            #gradient norms for monitoring
-            #grad_norms = [p.grad.norm().item() for p in self.model.parameters() if p.grad is not None]
-            #print(f"Grad norms: {grad_norms}")
-
-            self.optimizer.step()
+            self.optimizer.step()  # no gradient clipping (not in the EAML paper)
             total_loss += loss.item()
             cls_loss_sum += loss_dict['cls_loss'].item()
             kld_loss_sum += loss_dict['kld_loss'].item()
@@ -137,14 +133,6 @@ class EAMLTrainer:
         self.scheduler.step()
         epoch_time = time.time() - start_time
         print(f"Epoch {epoch+1} completed in {epoch_time:.2f}s")
-
-        label_counts = np.zeros(len(self.class_list), dtype=int)
-        for batch in dataloader:
-            batch_labels = batch['labels'].cpu().numpy()
-            for l in batch_labels:
-                label_counts[l] += 1
-
-        print("Label distribution in loader:", dict(enumerate(label_counts)))
         return total_loss / len(dataloader), epoch_time
 
     def evaluate(self, dataloader):
@@ -222,7 +210,9 @@ def main():
     parser.add_argument('--optimizer', choices=['sgd', 'adamw'], default='sgd',
                         help='sgd: SGD with Nesterov momentum, as in the EAML paper; adamw: AdamW')
     parser.add_argument('--momentum', type=float, default=0.9, help='Nesterov momentum for --optimizer sgd')
-    parser.add_argument('--weight_decay', type=float, default=0.01, help='Weight decay for L2 regularization')
+    parser.add_argument('--weight_decay', type=float, default=0.0,
+                        help='Weight decay on weight matrices (EAML paper: none). With SGD + momentum keep it tiny '
+                             '(<= 1e-5): it shrinks the weights by lr*wd/(1-momentum) per step')
     parser.add_argument('--class_mapping_path', type=str, required=True, help='Path to JSON file with full class mapping')
     parser.add_argument('--classes', type=str, default=None, help='Comma-separated list of class names to subset')
     parser.add_argument('--images_per_class', type=int, default=None,
@@ -237,7 +227,6 @@ def main():
     parser.add_argument('--kld_weight', type=float, default=0.5, help='Weight of the truncated-KL mutual-learning term (beta=0.5 in the EAML paper)')
     parser.add_argument('--kld_threshold', type=float, default=0.1, help='Threshold for truncated KL divergence')
     parser.add_argument('--embed_dim', type=int, default=512, help='Embedding dimension')
-    parser.add_argument('--dropout_rate', type=float, default=0.2, help='Dropout rate')
     parser.add_argument('--freeze_image_encoder', type=bool, default=False, help='False allows weights to update, True for feature extraction only')
 
     add_seed_arg(parser)
@@ -291,7 +280,6 @@ def main():
     model = EAMLModel(
         num_classes=len(class_list),
         embed_dim=args.embed_dim,
-        dropout_rate=args.dropout_rate,
         freeze_image_encoder=args.freeze_image_encoder
     )
 
@@ -341,6 +329,11 @@ def main():
         print(f"Training completed. Best validation loss: {best_val_loss:.4f}")
         with open(os.path.join(args.output_dir, 'classes.json'), 'w') as f:
             json.dump(class_list, f)
+        # Test accuracy of the best-validation checkpoint (the value for EAML_BASE_*_ACC in scripts/config.sh)
+        best = torch.load(os.path.join(args.output_dir, "eaml_best_model.pt"), map_location=device, weights_only=False)
+        model.load_state_dict(best["model_state_dict"])
+        test_loss, test_acc = trainer.evaluate(eaml_loader.get_loader('test', shuffle=False))
+        print(f"Best checkpoint (epoch {best['epoch'] + 1}): Test - Loss: {test_loss:.4f}, Accuracy: {test_acc:.2f}%")
     else:
         if args.resume and os.path.isfile(args.resume):
             print(f"Loading checkpoint '{args.resume}' for evaluation...")

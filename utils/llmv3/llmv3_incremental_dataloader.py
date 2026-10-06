@@ -8,6 +8,9 @@ import torchvision.transforms as T
 import random
 import numpy as np
 
+from utils.data_subset import split_indices
+from utils.image_transforms import normalize
+
 def poly8_to_bbox4(poly):
     xs = poly[0::2]
     ys = poly[1::2]
@@ -40,10 +43,11 @@ class IncrementalOCRTensorsDataset(Dataset):
         self.class2idx = {c: i for i, c in enumerate(self.label_classes)}
         self.max_length = max_length
         self.bbox_style = bbox_style
-        # Same preprocessing as the base model (utils/llmv3/llmv3_data_loader.py): images in [0, 1]
+        # Same preprocessing as the base model (utils/llmv3/llmv3_data_loader.py): 224 x 224, normalised to [-1, 1]
         self.transform = T.Compose([
             T.Resize((224, 224)),
             T.ToTensor(),
+            normalize(),
         ])
         self.dataset_name = dataset_name
 
@@ -188,7 +192,7 @@ def get_incremental_dataloader(
     else:
         data_path = base_path
         use_internal_split = True
-        print("Splitting data 80-10-10")
+        print("Splitting data 70/15/15 by document (utils/data_subset.split_documents, same as EAML)")
         print(f"Loading data from folder: {data_path}")
 
     
@@ -206,23 +210,11 @@ def get_incremental_dataloader(
     )
 
     if use_internal_split:
-        # Internal train/val/test split (e.g., 80/10/10 ratio)
-        num_samples = len(full_dataset)
-        np.random.seed(seed)
-        indices = np.random.permutation(num_samples)
-        train_end = int(0.8 * num_samples)
-        val_end = train_end + int(0.1 * num_samples)
-
-        if split == "train":
-            split_indices = indices[:train_end]
-        elif split == "val":
-            split_indices = indices[train_end:val_end]
-        elif split == "test":
-            split_indices = indices[val_end:]
-        else:
+        # No split folders (Tobacco-3482): stratified 70/15/15 split by document, independent of the run seed and
+        # identical to the EAML DIL loader, so both backbones and all seeds use the same documents per split
+        if split not in ("train", "val", "test"):
             raise ValueError(f"Unknown split: {split}")
-
-        dataset = Subset(full_dataset, split_indices.tolist())
+        dataset = Subset(full_dataset, split_indices([s[0] for s in full_dataset.samples], str(data_path), split))
     else:
         dataset = full_dataset
 

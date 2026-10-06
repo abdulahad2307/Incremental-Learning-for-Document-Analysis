@@ -13,7 +13,7 @@
 
 # Step 2 - base model: LayoutLMv3 on the 11 CIL base classes of RVL-CDIP (12,500 images per class, bert-base-uncased OCR).
 # Setup: 12,500 training images per class (the same documents as the EAML base, utils/data_subset.py),
-# official val split; AdamW with a fixed lr of 2e-5, effective batch 64 (8 x 8 accumulation), 20,000 steps (LayoutLMv3 paper).
+# official val split; Adam with a fixed lr of 2e-5, effective batch 64 (8 x 8 accumulation), 20,000 steps (LayoutLMv3 paper).
 # Output: $LLMV3_BASE_11 (read by the LayoutLMv3 class-incremental scripts (step 3)).
 # Submit from the repo root (paths and classes: scripts/config.sh):
 #   sbatch scripts/base_models/run_llmv3_11class.sh                          # Custom LayoutLMv3
@@ -26,8 +26,8 @@ conda activate mtil
 source "${SLURM_SUBMIT_DIR:-$PWD}/scripts/config.sh" || exit 1
 
 OUTPUT_DIR=$(dirname "$LLMV3_BASE_11")
-RESUME_CKPT=""                           # resume: "$OUTPUT_DIR/layoutlmv3_rvl_cdip_best.pt"
-RESUME_EPOCH=0                           # ... and the epoch it was saved at
+RESUME_CKPT=""                           # resume after the time limit: "$OUTPUT_DIR/layoutlmv3_rvl_cdip_last.pt"
+RESUME_EPOCH=0                           # ... and the last epoch the log shows as finished
 mkdir -p "$OUTPUT_DIR"
 
 python src/base_models/sota_llmv3_model.py \
@@ -46,7 +46,6 @@ python src/base_models/sota_llmv3_model.py \
   --max_length 512 \
   --device cuda \
   --bbox_style rect \
-  --patience 10 \
   --seed 42 \
   ${RESUME_CKPT:+--resume "$RESUME_CKPT" --resume_epoch "$RESUME_EPOCH"}
 

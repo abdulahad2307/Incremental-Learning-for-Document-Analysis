@@ -4,7 +4,7 @@ import os
 import unittest
 
 from tests.fixtures import GLOBAL_CLASSES
-from tests.runner import PipelineTestCase, add_matrix_tests, out_dir, run_script
+from tests.runner import PipelineTestCase, add_matrix_tests, check_predictions, out_dir, run_script
 
 SRC = "src/domain_incremental/eaml/"
 OOD = ["--ood_method", "vim", "--ood_tpr", 0.95, "--ood_max_per_class", 8]
@@ -19,6 +19,10 @@ METHODS = {
     "evm_posthoc": ("domain_incremental_evm.py", [], ["EVM known acc"]),
 }
 
+# method -> (EVM probabilities, OOD scores) expected in its saved predictions
+SAVES = {"no_evm": (False, False), "evm": (True, False), "evm_ood": (True, True), "ievm": (True, False),
+         "regevm": (True, False), "ood_only": (False, True), "evm_posthoc": (True, False)}
+
 
 def run_method(test, method, strategy):
     script, extra, logs = METHODS[method]
@@ -31,6 +35,7 @@ def run_method(test, method, strategy):
         "--strategy", strategy, "--use_ewc", "--use_exemplars", "--max_exemplars", 64, "--exemplar_selection", "random",
         "--use_bias_correction", "--finetune_mode", "last_layer",
     ] + extra, cwd=out, expect_files=[os.path.join(out, "best_model.pth")], expect_logs=["Replay memory"] + logs)
+    check_predictions(test, out, "dil", ["rvl", "tobacco"], *SAVES[method])
 
 
 class TestEAMLDIL(PipelineTestCase):

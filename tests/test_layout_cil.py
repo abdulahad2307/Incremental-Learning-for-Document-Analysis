@@ -7,7 +7,7 @@ import unittest
 import torch
 
 from tests.fixtures import CIL_ALL, CIL_BASE, CIL_NEW
-from tests.runner import PipelineTestCase, add_matrix_tests, out_dir, run_script
+from tests.runner import PipelineTestCase, add_matrix_tests, check_predictions, out_dir, run_script
 
 SRC = "src/class_incremental/llmv3/"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -19,6 +19,10 @@ METHODS = {
     "ievm":    ("llmv3_class_incremental_ievm_training.py", ["--lambda_evm", 0.1], ["EVM open set test"]),
     "regevm":  ("llmv3_class_incremental_reg_evm_training.py", ["--lambda_evm", 0.1], ["EVM open set test"]),
 }
+
+# method -> (EVM probabilities, OOD scores) expected in its saved predictions
+SAVES = {"no_evm": (False, False), "evm": (True, False), "evm_ood": (True, True), "ievm": (True, False),
+         "regevm": (True, False), "ood_only": (False, True), "evm_posthoc": (True, False)}
 
 
 def cil_args(data, base_model, base_classes, new_class, ckpt_dir, strategy):
@@ -45,6 +49,7 @@ def run_method(test, method, strategy):
     run_script(test, SRC + script, cil_args(test.data, base, CIL_BASE, CIL_NEW, out, strategy) + extra,
                cwd=out, expect_logs=logs)
     test.assertTrue(os.path.exists(best_checkpoint(out)), f"no best checkpoint in {out}")
+    check_predictions(test, out, f"cil_{CIL_NEW}", ["seen", "unseen"], *SAVES[method])
 
 
 class TestLayoutCIL(PipelineTestCase):

@@ -11,6 +11,7 @@ from utils.domain_IL.dil_utils import AdaptiveLR
 from utils.llmv3.llmv3_model_loader import load_llmv3_checkpoint
 from utils.llmv3.llmv3_il_common import add_il_args, make_teacher, distill_term, center_classifier_bias, gil as gil_ratio, fit_evm, evm_open_set_eval
 from utils import run_log
+from utils.eval.predictions import save_predictions
 from utils.evm.evm_loss import evm_nll_loss
 from utils.il_checks import warn_inactive_terms
 from utils.training_scope import set_training_scope
@@ -285,6 +286,7 @@ def main():
     feature_dict, _, _ = extract_features_for_evm(model, inc_train_loader, device, all_classes)
     evm_hybrid = EVMClassifier(tailsize=args.evm_tailsize, cover_threshold=args.evm_threshold)
     evm_hybrid.fit(feature_dict)
+    best_evm = None  # EVM state at the best model (evm_hybrid changes every epoch)
     print("EVM Initialized.")
 
     set_training_scope(model, args.training_mode)
@@ -403,6 +405,7 @@ def main():
                 'best_val_acc': best_val_acc,
             }, save_path)
             print(f"Saved best model checkpoint: {save_path}")
+            best_evm = copy.deepcopy(evm_hybrid)
             patience_counter = 0
         else:
             patience_counter += 1
@@ -415,6 +418,7 @@ def main():
     best_path = os.path.join(args.checkpoint_dir, f"layoutlmv3_domain_incremental_best.pt")
     best_ckpt = torch.load(best_path, map_location=device)
     model.load_state_dict(best_ckpt['model_state_dict'])
+    final_evm = best_evm if best_evm is not None else evm_hybrid  # the EVM fitted with the best model
     if args.use_bias_correction:
         center_classifier_bias(model)
     model.eval()
@@ -434,7 +438,13 @@ def main():
     print(f"Final Tobacco-3482 Test Loss: {test_loss_inc:.4f}, Accuracy: {test_acc_inc:.4f}, F1: {test_f1_inc:.4f}")
 
     # EVM open set on both domains' test sets: classes the EVM was never fitted on are the unknowns
-    evm_open_set_eval(evm_hybrid, model, device, base_test_loader, all_classes, inc_test_loader, all_classes, tag="EVM open set test")
+    evm_open_set_eval(final_evm, model, device, base_test_loader, all_classes, inc_test_loader, all_classes, tag="EVM open set test")
+
+    # Per-document predictions after the domain step (best model), on the test sets of both domains
+    save_predictions(model, device, args.checkpoint_dir, "dil", all_classes,
+                     {"rvl": (base_test_loader, all_classes), "tobacco": (inc_test_loader, all_classes)},
+                     evm=final_evm, ood_detector=None, checkpoint=best_path)
+
 
 if __name__ == "__main__":
     main()

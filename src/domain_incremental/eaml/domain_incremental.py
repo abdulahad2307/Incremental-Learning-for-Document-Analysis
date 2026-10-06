@@ -17,6 +17,7 @@ from utils.domain_IL.dil_utils import (
 #from utils.domain_IL.training_modes import get_dil_training_mode
 from utils.domain_IL.dil_model_loader import load_eaml_model_partial, set_finetune_mode
 from utils import run_log
+from utils.eval.predictions import save_predictions
 from utils.il_checks import warn_inactive_terms
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -216,8 +217,10 @@ def run_domain_incremental(
                     class_acc=dict(zip(global_classes, acc_cls)))
         print(f"Test accuracy on domain '{domain_name}': {acc:.4f}")
 
-
-
+    # Per-document predictions after the domain step (best model), on the test sets of both domains
+    save_predictions(model, DEVICE, checkpoint_dir, "dil", global_classes,
+                     {"rvl": (test_loader_pretrained, global_classes), "tobacco": (test_loader_incremental, global_classes)},
+                     evm=None, ood_detector=None, checkpoint=best_model_path)
 
 
 if __name__ == "__main__":

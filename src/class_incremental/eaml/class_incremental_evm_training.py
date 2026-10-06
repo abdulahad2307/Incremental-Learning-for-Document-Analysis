@@ -18,6 +18,7 @@ from utils.class_IL.cil_utils import (
 )
 from utils.class_IL.training_modes import get_training_mode
 from utils import run_log
+from utils.eval.predictions import save_predictions
 from utils.evm.evm_classifier import EVMClassifier
 from utils.evm.evm_eval import evm_openset_metrics
 from utils.evm.evm_viz import plot_openset_histograms
@@ -187,8 +188,6 @@ def run_incremental_learning_evm(
                                                batch_size, ocr_data=ocr_tensor_path)
         val_loader = get_class_il_loader(model_name, os.path.join(data_root, "val"), current_classes,
                                          batch_size, ocr_data=ocr_tensor_path)
-        test_loader = get_class_il_loader(model_name, os.path.join(data_root, "test"), current_classes,
-                                          batch_size, ocr_data=ocr_tensor_path)
         torch.cuda.empty_cache()
 
         cfg = DocFormerConfig() if model_name == "docformer" else None
@@ -304,29 +303,6 @@ def run_incremental_learning_evm(
                     "step_best_path": best_model_path
                 })
                 
-                test_metrics = CILMetrics(current_classes)
-                test_result = evaluate(model, test_loader, DEVICE, test_metrics, full_model_acc)
-                run_log.log("step_test", step=unseen_idx + 1, new_class=new_class, epoch=epoch + 1, split="test",
-                            loss=test_result['loss'], acc=test_result['top1_acc'], gil_base=((test_result['top1_acc'] - full_model_acc) / (1 - full_model_acc)) if full_model_acc else None,
-                            class_acc=dict(zip(current_classes, test_result['class_acc'])) if test_result.get('class_acc') is not None else None)
-                print("Class-wise Test Accuracy:")
-                for cls, acc in zip(current_classes, test_result['class_acc']):
-                    print(f"  {cls}: {acc:.4f}")
-                # ===== GIL =====
-                gil_base = 0.953
-                if full_model_acc is not None:
-                    gil = (test_result['top1_acc'] - full_model_acc) / (1 - full_model_acc)
-                    print(f"GIL: {gil:.4f}")
-                if full_model_acc is not None:
-                    gil = (test_result['top1_acc'] - gil_base) / (1 - gil_base)
-                    print(f"GIL (wrt base): {gil:.4f}")
-                if use_exemplars and evm.initialized:
-                    print("Running EVM open set evaluation on validation set...")
-                    val_features_dict = extract_features(model, val_loader, DEVICE)
-                    os_result = evm_openset_metrics(evm, val_features_dict, known_classes=current_classes)
-                    run_log.log("open_set", step=unseen_idx + 1, new_class=new_class, epoch=epoch + 1, split="val",
-                                evm_known_acc=os_result['open_set_accuracy'], evm_unknown_rej=os_result['unknown_rejection'])
-                    print(f"[EVM Open Set Val] Known acc: {os_result['open_set_accuracy']:.4f}, Unknown rejection: {os_result['unknown_rejection']:.4f}")
             else:
                 this_epochs_no_improve += 1
                 print(f"Patience counter: {this_epochs_no_improve}/{patience}")
@@ -408,6 +384,10 @@ def run_incremental_learning_evm(
         del checkpoint
         torch.cuda.empty_cache()
         final_model.eval()
+        if use_bias_correction and hasattr(final_model, "fusion_classifier"):
+            # Bias correction on the evaluated model: the step checkpoint holds the model before the correction
+            with torch.no_grad():
+                final_model.fusion_classifier.bias -= final_model.fusion_classifier.bias.mean()
         train_loader_full = get_class_il_loader(model_name, os.path.join(data_root, "train"),
                                                learned_classes, batch_size, ocr_data=ocr_tensor_path)
         val_loader_full = get_class_il_loader(model_name, os.path.join(data_root, "val"),
@@ -439,6 +419,14 @@ def run_incremental_learning_evm(
         evaluate_with_metrics("Train", train_loader_full)
         evaluate_with_metrics("Validation", val_loader_full)
         evaluate_with_metrics("Test", test_loader_full)
+
+        # Per-document predictions of this step: test documents of the learned and of the not-yet-learned classes
+        future_classes = [c for c in all_classes if c not in learned_classes]
+        future_loader = get_class_il_loader(model_name, os.path.join(data_root, "test"), future_classes, batch_size,
+                                            ocr_data=ocr_tensor_path) if future_classes else None
+        save_predictions(final_model, DEVICE, checkpoint_dir, f"cil_{new_class}", learned_classes,
+                         {"seen": (test_loader_full, learned_classes), "unseen": (future_loader, future_classes)},
+                         evm=evm, ood_detector=None, new_class=new_class, checkpoint=final_global_best_path)
 
         # --- EVM open set test evaluation ---
         test_features_dict = extract_features(final_model, get_class_il_loader(

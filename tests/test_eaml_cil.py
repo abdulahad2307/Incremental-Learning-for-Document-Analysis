@@ -4,7 +4,7 @@ import os
 import unittest
 
 from tests.fixtures import CIL_ALL, CIL_BASE, CIL_NEW
-from tests.runner import PipelineTestCase, add_matrix_tests, out_dir, run_script
+from tests.runner import PipelineTestCase, add_matrix_tests, check_predictions, out_dir, run_script
 
 SRC = "src/class_incremental/eaml/"
 OOD = ["--ood_method", "vim", "--ood_tpr", 0.95, "--ood_max_per_class", 8]
@@ -19,6 +19,10 @@ METHODS = {
     "ood_only":    ("class_incremental_ood.py", OOD, ["Open-set step"]),
     "evm_posthoc": ("class_incremental_evm.py", [], []),
 }
+
+# method -> (EVM probabilities, OOD scores) expected in its saved predictions
+SAVES = {"no_evm": (False, False), "evm": (True, False), "evm_ood": (True, True), "ievm": (True, False),
+         "regevm": (True, False), "ood_only": (False, True), "evm_posthoc": (True, False)}
 
 
 def cil_args(data, base_model, base_classes, new_class, ckpt_dir, strategy):
@@ -38,6 +42,7 @@ def run_method(test, method, strategy):
     base = os.path.join(test.data, "ckpt", "eaml_base_3.pt")
     run_script(test, SRC + script, cil_args(test.data, base, CIL_BASE, CIL_NEW, out, strategy) + extra,
                cwd=out, expect_files=[os.path.join(out, f"best_model_{CIL_NEW}.pth")], expect_logs=logs)
+    check_predictions(test, out, f"cil_{CIL_NEW}", ["seen", "unseen"], *SAVES[method])
 
 
 class TestEAMLCIL(PipelineTestCase):
@@ -52,6 +57,8 @@ class TestEAMLCIL(PipelineTestCase):
         run_script(self, SRC + script,
                    cil_args(self.data, step1, CIL_BASE + [CIL_NEW], "budget", out, "standard") + extra + ["--evm_persist"],
                    cwd=out, expect_files=[os.path.join(out, "evm_state_budget.pt")], expect_logs=["Loaded open-set state"])
+        # the last class is learned: no unseen classes are left, so no open-set OOD detector is fitted
+        check_predictions(self, out, "cil_budget", ["seen"], evm=True, ood=False)
 
     def test_joint_training_baseline(self):
         out = out_dir("eaml_cil", "joint")

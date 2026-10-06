@@ -18,6 +18,7 @@ from utils.domain_IL.dil_utils import (
 )
 from utils.domain_IL.dil_model_loader import load_eaml_model_partial, set_finetune_mode
 from utils import run_log
+from utils.eval.predictions import save_predictions
 
 from utils.ood.ood_eval import make_detector, evaluate_ood
 from utils.domain_IL.dil_utils import extract_features, extract_features_and_logits
@@ -216,6 +217,11 @@ def run_domain_incremental_ood(
             tag=f"Domain shift {pretrained_domain} -> {incremental_domain}, {label}",
             savepath=os.path.join(checkpoint_dir, f"ood_{ood_method}_domain_shift_{label.split()[0]}.png"),
         )
+
+    # Per-document predictions after the domain step (best model), on the test sets of both domains
+    save_predictions(model, DEVICE, checkpoint_dir, "dil", global_classes,
+                     {"rvl": (test_loader_pretrained, global_classes), "tobacco": (test_loader_incremental, global_classes)},
+                     evm=None, ood_detector=ood_detector, checkpoint=best_model_path)
 
 
 if __name__ == "__main__":
