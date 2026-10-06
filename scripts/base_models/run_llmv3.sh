@@ -26,8 +26,8 @@ conda activate mtil
 source "${SLURM_SUBMIT_DIR:-$PWD}/scripts/config.sh" || exit 1
 
 OUTPUT_DIR=$(dirname "$LLMV3_BASE_16")
-RESUME_CKPT=""                           # resume: "$OUTPUT_DIR/layoutlmv3_rvl_cdip_best.pt"
-RESUME_EPOCH=0                           # ... and the epoch it was saved at
+RESUME_CKPT=""                           # resume after the time limit: "$OUTPUT_DIR/layoutlmv3_rvl_cdip_last.pt"
+RESUME_EPOCH=0                           # ... and the last epoch the log shows as finished
 mkdir -p "$OUTPUT_DIR"
 
 python src/base_models/sota_llmv3_model.py \
@@ -45,7 +45,6 @@ python src/base_models/sota_llmv3_model.py \
   --max_length 512 \
   --device cuda \
   --bbox_style rect \
-  --patience 10 \
   --seed 42 \
   ${RESUME_CKPT:+--resume "$RESUME_CKPT" --resume_epoch "$RESUME_EPOCH"}
 

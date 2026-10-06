@@ -8,11 +8,12 @@ from PIL import Image, UnidentifiedImageError
 from sklearn.model_selection import StratifiedShuffleSplit
 
 from utils.data_subset import split_indices
+from utils.image_transforms import normalize
 
 common_transform = transforms.Compose([
     transforms.Resize((229, 229)),
     transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    normalize(),
 ])
 
 ACCEPTED_EXTENSIONS = (".png", ".jpg", ".jpeg", ".tif", ".tiff")

@@ -227,7 +227,6 @@ def main():
     parser.add_argument('--kld_weight', type=float, default=0.5, help='Weight of the truncated-KL mutual-learning term (beta=0.5 in the EAML paper)')
     parser.add_argument('--kld_threshold', type=float, default=0.1, help='Threshold for truncated KL divergence')
     parser.add_argument('--embed_dim', type=int, default=512, help='Embedding dimension')
-    parser.add_argument('--dropout_rate', type=float, default=0.2, help='Dropout rate')
     parser.add_argument('--freeze_image_encoder', type=bool, default=False, help='False allows weights to update, True for feature extraction only')
 
     add_seed_arg(parser)
@@ -281,7 +280,6 @@ def main():
     model = EAMLModel(
         num_classes=len(class_list),
         embed_dim=args.embed_dim,
-        dropout_rate=args.dropout_rate,
         freeze_image_encoder=args.freeze_image_encoder
     )
 
@@ -331,6 +329,11 @@ def main():
         print(f"Training completed. Best validation loss: {best_val_loss:.4f}")
         with open(os.path.join(args.output_dir, 'classes.json'), 'w') as f:
             json.dump(class_list, f)
+        # Test accuracy of the best-validation checkpoint (the value for EAML_BASE_*_ACC in scripts/config.sh)
+        best = torch.load(os.path.join(args.output_dir, "eaml_best_model.pt"), map_location=device, weights_only=False)
+        model.load_state_dict(best["model_state_dict"])
+        test_loss, test_acc = trainer.evaluate(eaml_loader.get_loader('test', shuffle=False))
+        print(f"Best checkpoint (epoch {best['epoch'] + 1}): Test - Loss: {test_loss:.4f}, Accuracy: {test_acc:.2f}%")
     else:
         if args.resume and os.path.isfile(args.resume):
             print(f"Loading checkpoint '{args.resume}' for evaluation...")

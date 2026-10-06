@@ -2,10 +2,9 @@ import argparse
 import os
 import torch
 from utils.seed import add_seed_arg, set_seed
-from utils.llmv3.llmv3_data_loader import get_dataloaders
+from utils.llmv3.llmv3_data_loader import get_dataloaders, get_test_loader
 from utils.llmv3.llmv3_model_loader import build_llmv3_model, checkpoint_meta, HF_LAYOUTLMV3, MODEL_TYPES
 from utils.llmv3.llmv3_train_utils import train_epoch, val_epoch
-from utils.llmv3.llmv3_eval_utils import evaluate
 
 
 def parse_args():
@@ -19,8 +18,9 @@ def parse_args():
     parser.add_argument("--grad_accum_steps", type=int, default=1,
                         help="Batches per optimizer step; effective batch = batch_size x grad_accum_steps "
                              "(LayoutLMv3 paper: 64, e.g. 8 x 8)")
-    parser.add_argument("--max_steps", type=int, default=None,
-                        help="Stop after this many optimizer steps (LayoutLMv3 paper: 20,000); --epochs is an upper bound")
+    parser.add_argument("--max_steps", type=int, default=20000,
+                        help="Optimizer steps to train (LayoutLMv3 paper: 20,000; no early stopping); --epochs is an "
+                             "upper bound. The checkpoint with the best validation accuracy is kept.")
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--lr", type=float, default=2e-5, help="Fixed learning rate (2e-5 in the LayoutLMv3 paper)")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
@@ -35,7 +35,6 @@ def parse_args():
     parser.add_argument("--vision_encoder", type=str, default="vit_base_patch16_224")
     parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume training")
     parser.add_argument("--resume_epoch", type=int, default=0, help="Epoch to resume from")
-    parser.add_argument("--patience", type=int, default=10, help="Early stopping patience")
     parser.add_argument("--images_per_class", type=int, default=None,
                         help="Max number of images to sample per class")
     parser.add_argument("--seed", type=int, default=42,
@@ -92,7 +91,6 @@ def main():
     total_steps = 0
 
     best_val_acc = 0.0
-    patience_counter = 0
 
     # Resume functionality
     if args.resume:
@@ -100,7 +98,6 @@ def main():
         model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         best_val_acc = checkpoint['best_val_acc']
-        patience_counter = checkpoint.get('patience_counter', 0)
         total_steps = checkpoint.get('total_steps', 0)
         print(f"Resumed training from {args.resume} at epoch {args.resume_epoch}")
 
@@ -117,30 +114,38 @@ def main():
 
         if val_acc > best_val_acc:
             best_val_acc = val_acc
-            patience_counter = 0
             save_path = os.path.join(args.save_dir, f"layoutlmv3_{args.dataset}_best.pt")
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'best_val_acc': best_val_acc,
-                'patience_counter': patience_counter,
                 'total_steps': total_steps,
                 **checkpoint_meta(model),
             }, save_path)
             print(f"Saved best model to {save_path}")
-        else:
-            patience_counter += 1
-            print(f"No improvement. Patience counter: {patience_counter}/{args.patience}")
+        # Latest state for resuming a run that hits the job's time limit (--resume <this> --resume_epoch <epoch>)
+        torch.save({'epoch': epoch, 'model_state_dict': model.state_dict(), 'optimizer_state_dict': optimizer.state_dict(),
+                    'best_val_acc': best_val_acc, 'total_steps': total_steps, **checkpoint_meta(model)},
+                   os.path.join(args.save_dir, f"layoutlmv3_{args.dataset}_last.pt"))
 
-        if patience_counter >= args.patience:
-            print("Early stopping triggered.")
-            break
         if args.max_steps is not None and total_steps >= args.max_steps:
             print(f"Reached --max_steps ({total_steps} optimizer steps).")
             break
 
     print("Training completed.")
+
+    # Test accuracy of the best-validation checkpoint (the value for LLMV3[HF]_BASE_*_ACC in scripts/config.sh)
+    test_image_dir = os.path.join(args.image_dir, "test")
+    if os.path.isdir(test_image_dir):
+        best = torch.load(os.path.join(args.save_dir, f"layoutlmv3_{args.dataset}_best.pt"), map_location=device)
+        model.load_state_dict(best["model_state_dict"])
+        test_loader = get_test_loader(args.dataset, args.ocr_tensor_file, args.base_classes, test_image_dir,
+                                      batch_size=args.batch_size, max_length=args.max_length,
+                                      bbox_style=args.bbox_style, seed=args.seed)
+        test_loss, test_acc = val_epoch(model, test_loader, device)
+        print(f"Best checkpoint (epoch {best['epoch']}, val acc {best['best_val_acc']:.4f}): "
+              f"Test loss={test_loss:.4f}, Test accuracy={test_acc:.4f}")
 
 
 if __name__ == "__main__":

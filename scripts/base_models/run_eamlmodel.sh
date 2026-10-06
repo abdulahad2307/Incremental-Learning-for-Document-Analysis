@@ -48,7 +48,6 @@ python src/base_models/sota_eaml_model.py \
   --kld_weight 0.5 \
   --kld_threshold 0.1 \
   --embed_dim 512 \
-  --dropout_rate 0.5 \
   ${RESUME_CKPT:+--resume "$RESUME_CKPT"}
 
 echo "Finished. Best model: $EAML_BASE_11"

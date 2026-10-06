@@ -9,6 +9,7 @@ import random
 import numpy as np
 
 from utils.data_subset import split_indices
+from utils.image_transforms import normalize
 
 def poly8_to_bbox4(poly):
     xs = poly[0::2]
@@ -42,10 +43,11 @@ class IncrementalOCRTensorsDataset(Dataset):
         self.class2idx = {c: i for i, c in enumerate(self.label_classes)}
         self.max_length = max_length
         self.bbox_style = bbox_style
-        # Same preprocessing as the base model (utils/llmv3/llmv3_data_loader.py): images in [0, 1]
+        # Same preprocessing as the base model (utils/llmv3/llmv3_data_loader.py): 224 x 224, normalised to [-1, 1]
         self.transform = T.Compose([
             T.Resize((224, 224)),
             T.ToTensor(),
+            normalize(),
         ])
         self.dataset_name = dataset_name
 

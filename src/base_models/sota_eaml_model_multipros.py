@@ -297,7 +297,6 @@ def train_worker(rank, world_size, args):
         model = EAMLModel(
             num_classes=len(class_list),
             embed_dim=args.embed_dim,
-            dropout_rate=args.dropout_rate,
             freeze_image_encoder=args.freeze_image_encoder
         )
         
