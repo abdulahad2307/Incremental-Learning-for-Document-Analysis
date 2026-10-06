@@ -13,7 +13,7 @@
 
 # Step 2 - base model: EAML on all 16 RVL-CDIP classes (Tesseract OCR).
 # Setup: 12,500 training images per class (the same documents as the LayoutLMv3 base, utils/data_subset.py),
-# official val split; SGD + Nesterov momentum, lr 1e-3 halved every 10 epochs, batch 16 (EAML paper).
+# official val split; SGD + Nesterov momentum, lr 1e-3 halved every 10 epochs, batch 16, no weight decay (EAML paper).
 # Output: $EAML_BASE_16 (read by the EAML domain-incremental scripts (step 4)).
 # Submit from the repo root (paths and classes: scripts/config.sh):
 #   sbatch scripts/base_models/run_eamlmodel_all.sh
@@ -40,7 +40,7 @@ python src/base_models/sota_eaml_model.py \
   --seed 42 \
   --optimizer sgd \
   --learning_rate 1e-3 \
-  --weight_decay 0.01 \
+  --weight_decay 0 \
   --device cuda \
   --patience 10 \
   --keep_checkpoints 2 \
