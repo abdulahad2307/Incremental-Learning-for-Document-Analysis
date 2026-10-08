@@ -127,8 +127,10 @@ def collect_predictions(model, loader, device, evm=None, ood_detector=None):
         if batch is None:
             continue
         logits, feats, extra = _forward(model, batch, device)
-        cols["_idx"].append(batch["_idx"])
-        cols["y_true"].append(torch.as_tensor(batch["labels"]).cpu())
+        # clone(): tensors from DataLoader workers live in shared memory, one open file per tensor; keeping them in
+        # these lists would hold every file open and fail with "Too many open files" on full test sets
+        cols["_idx"].append(batch["_idx"].clone())
+        cols["y_true"].append(torch.as_tensor(batch["labels"]).cpu().clone())
         cols["logits"].append(logits.float().cpu())
         for k, v in extra.items():
             cols[k].append(v.float().cpu())

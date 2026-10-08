@@ -58,11 +58,11 @@ LLMV3_BASE_11=$BASE_ROOT/llmv3_11cls/layoutlmv3_rvl_cdip_best.pt
 LLMV3_BASE_16=$BASE_ROOT/llmv3_16cls/layoutlmv3_rvl_cdip_best.pt
 
 # Base-model test accuracies (fractions) that G_IL is measured against.
-# Defaults are the paper's values; replace them with your own step-2 results before running steps 3-4.
-EAML_BASE_11_ACC=0.9302
-EAML_BASE_16_ACC=0.9120
-LLMV3_BASE_11_ACC=0.8928
-LLMV3_BASE_16_ACC=0.8892
+# Step-2 results of the base models trained at tag exp-base-v2 (Oct 2026; best checkpoint, official test split).
+EAML_BASE_11_ACC=0.9213
+EAML_BASE_16_ACC=0.9114
+LLMV3_BASE_11_ACC=0.9341
+LLMV3_BASE_16_ACC=0.9258
 LLMV3HF_BASE_11_ACC=                        # pre-trained LayoutLMv3: fill in after its step-2 runs
 LLMV3HF_BASE_16_ACC=
 
