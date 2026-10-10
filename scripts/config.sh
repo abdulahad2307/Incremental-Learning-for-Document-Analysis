@@ -63,8 +63,8 @@ EAML_BASE_11_ACC=0.9213
 EAML_BASE_16_ACC=0.9114
 LLMV3_BASE_11_ACC=0.9341
 LLMV3_BASE_16_ACC=0.9258
-LLMV3HF_BASE_11_ACC=                        # pre-trained LayoutLMv3: fill in after its step-2 runs
-LLMV3HF_BASE_16_ACC=
+LLMV3HF_BASE_11_ACC=0.9323
+LLMV3HF_BASE_16_ACC=0.9238
 
 # ---------------- LayoutLMv3 variant ----------------
 # custom: Custom LayoutLMv3 (bert-base-uncased + ViT + fusion transformer; the thesis / workshop model)
