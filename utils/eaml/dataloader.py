@@ -9,7 +9,7 @@ from transformers import BertTokenizer
 from typing import Optional, List, Dict
 
 from utils.data_subset import select_per_class, DEFAULT_SEED
-from utils.image_transforms import normalize
+from utils.image_transforms import normalize, eaml_train_transform, eaml_eval_transform
 
 class EAML_Dataset(Dataset):
     def __init__(
@@ -244,20 +244,9 @@ class EAML_DataLoader:
         self.transform_eval = self._build_transform(train=False)
 
     def _build_transform(self, train=True):
-        base_transforms = [
-            transforms.Resize((self.img_size, self.img_size)),
-            transforms.ToTensor(),
-            normalize()
-        ]
-        if train:
-            # EAML paper (Sec. 5.3): horizontal/vertical shift of 0.1, shear of 0.1 (Keras shear_range, in degrees)
-            # and cutout (random erasing on the normalised tensor)
-            aug_transforms = [
-                transforms.RandomAffine(degrees=0, translate=(0.1, 0.1), shear=0.1),
-            ]
-            return transforms.Compose(aug_transforms + base_transforms + [transforms.RandomErasing(p=0.5, value=0)])
-        else:
-            return transforms.Compose(base_transforms)
+        # EAML paper augmentation for training, plain resize + normalisation otherwise (utils/image_transforms.py,
+        # shared with the incremental steps)
+        return eaml_train_transform(self.img_size) if train else eaml_eval_transform(self.img_size)
 
     def get_loader(self, split: str, shuffle: bool = True):
         dataset_path = os.path.join(self.data_dir, split)
