@@ -473,7 +473,20 @@ Stand-alone evaluation of a finished model: `tools/eval/eaml_eval.py`, `tools/ev
 
 Each script calls the matching entry point in `src/class_incremental/<backbone>/` or `src/domain_incremental/<backbone>/`; run `python <entry point> --help` for all options.
 
-**CIL training data per step (EAML):** the new class's training images plus, with `--use_exemplars`, an exemplar memory of every previous class (`--max_exemplars` in total, `--exemplar_selection herding|random`, herding on a 1000-image pool per class). The memory is rebuilt from the previous step's model when a job starts, so one-class-per-job runs work. `--joint_training` instead trains on all images of all classes seen so far — an upper bound, not incremental learning. New-class images (~20k) far outnumber exemplars (~20 per class): use `--use_balanced_sampler`.
+**Training recipe of an incremental step** (`utils/paper_recipe.py`): the backbone is trained as in its paper, in CIL and DIL alike; the IL methods (replay, EWC, KD, EVM, OOD, bias correction) only add their own terms.
+
+| | EAML | LayoutLMv3 (both variants) |
+|---|---|---|
+| Optimizer | SGD with Nesterov momentum 0.9, no weight decay | Adam, no weight decay |
+| Learning rate | 1e-3, halved every 10 epochs (continues correctly after a resume) | 2e-5, fixed |
+| Batch | 16 | 64 |
+| Augmentation | shift 0.1, shear 0.1, cutout, **only while training**: herding, EWC Fisher and EVM features use unaugmented images (`utils/image_transforms.set_train_augmentation`). DIL replay exemplars are stored preprocessed and are not augmented. | none |
+| Length | early stopping on the validation set, patience 10 (at most 100 epochs); best-validation checkpoint | same |
+| Other | fp32, no gradient clipping | same (no mixed precision) |
+
+Training documents: every incremental step trains on, and selects its exemplars from, the base models' training documents (the same 12,500 per class for both backbones and every seed, `utils/data_subset.base_training_documents`); validation and test use the full splits. Shared IL settings for both backbones: replay of 20 exemplars per class selected by herding, EWC with lambda 5000, `last_layer` training scope, bias correction, and in CIL the class-balanced sampler. The post-hoc EVM variants (`run_classIL_evm.sh`, `run_domainIL_evm.sh`) and `run_domainIL_ood.sh` use the same settings. Until Oct 2026 the incremental steps used AdamW (weight decay 0.01), an adaptive learning rate, different batch sizes and learning rates per script (LayoutLMv3 1e-3, EAML DIL 1e-4), mixed precision for LayoutLMv3, no augmentation, random exemplars in EAML DIL, no balanced sampler for LayoutLMv3 CIL, and different training documents per backbone (EAML CIL: all ~20,000 images of a new class; LayoutLMv3: a random 12,500 drawn with the run seed).
+
+**CIL training data per step (EAML):** the new class's training images plus, with `--use_exemplars`, an exemplar memory of every previous class (`--max_exemplars` in total, `--exemplar_selection herding|random`, herding on a 1000-image pool per class). The memory is rebuilt from the previous step's model when a job starts, so one-class-per-job runs work. `--joint_training` instead trains on all images of all classes seen so far — an upper bound, not incremental learning. New-class images (12,500) far outnumber exemplars (20 per class), so all CIL launchers of both backbones pass `--use_balanced_sampler`.
 
 **EVM state between steps:** the EVM-training CIL scripts (`evm`, `evmood`, `ievm`, `regevm`, both backbones) pass `--evm_persist`: after each step the EVM (and for EVM+OOD the ViM behind L_OOD) is saved as `evm_state_<class>.pt` next to that step's best checkpoint, and the next step's job loads it, so L_EVM is active from step 2 on. Without `--evm_persist` the EVM lives in memory only, and with one class per job L_EVM would never be active. iEVM adds each new class with its partial update (Eq. 8) instead of refitting from scratch.
 
