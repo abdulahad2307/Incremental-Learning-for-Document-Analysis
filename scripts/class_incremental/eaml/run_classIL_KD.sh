@@ -38,7 +38,7 @@ python src/class_incremental/eaml/class_incremental.py \
   --base_model_path "$BASE_MODEL" \
   --model_name eaml \
   --checkpoint_dir "$CKPT_DIR" \
-  --batch_size 64 \
+  --batch_size 16 \
   --lr 1e-3 \
   --num_epochs 100 \
   --strategy distillation \
@@ -53,7 +53,6 @@ python src/class_incremental/eaml/class_incremental.py \
   --exemplar_selection herding \
   --training_mode last_layer \
   --full_model_acc "$EAML_BASE_11_ACC" \
-  --weight_decay 0.01 \
   --patience 10 \
   ${RESUME_CKPT:+--resume --resume_checkpoint "$RESUME_CKPT"}
 

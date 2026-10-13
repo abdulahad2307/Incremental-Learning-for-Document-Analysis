@@ -37,7 +37,7 @@ python src/class_incremental/eaml/class_incremental_evm_training.py \
   --all_classes "$ALL_CLASSES" \
   --base_classes "$BASE_CLASSES" \
   --unseen_classes "$UNSEEN_CLASSES" \
-  --batch_size 64 \
+  --batch_size 16 \
   --lr 1e-3 \
   --num_epochs 100 \
   --strategy standard \

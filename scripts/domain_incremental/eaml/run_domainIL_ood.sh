@@ -37,8 +37,8 @@ python src/domain_incremental/eaml/domain_incremental_ood.py \
   --eaml_ckpt_path "$EAML_BASE_16" \
   --checkpoint_dir "$CKPT_DIR" \
   --batch_size 16 \
-  --lr 1e-4 \
-  --num_epochs 200 \
+  --lr 1e-3 \
+  --num_epochs 100 \
   --strategy distillation \
   --temperature 2.0 \
   --lambda_distill 1.0 \
@@ -46,6 +46,7 @@ python src/domain_incremental/eaml/domain_incremental_ood.py \
   --use_ewc \
   --use_exemplars \
   --max_exemplars 320 \
+  --exemplar_selection herding \
   --unfreeze_depth 2 \
   --patience 10 \
   --use_bias_correction \

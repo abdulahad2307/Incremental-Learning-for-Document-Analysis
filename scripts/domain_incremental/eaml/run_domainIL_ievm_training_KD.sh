@@ -35,8 +35,8 @@ python src/domain_incremental/eaml/domain_incremental_ievm_training.py \
   --global_classes "$DIL_CLASSES" \
   --eaml_ckpt_path "$EAML_BASE_16" \
   --checkpoint_dir "$CKPT_DIR" \
-  --batch_size 32 \
-  --lr 1e-4 \
+  --batch_size 16 \
+  --lr 1e-3 \
   --num_epochs 100 \
   --strategy distillation \
   --temperature 2.0 \
@@ -45,6 +45,7 @@ python src/domain_incremental/eaml/domain_incremental_ievm_training.py \
   --use_ewc \
   --use_exemplars \
   --max_exemplars 320 \
+  --exemplar_selection herding \
   --use_bias_correction \
   --finetune_mode last_layer \
   --unfreeze_depth 2 \
