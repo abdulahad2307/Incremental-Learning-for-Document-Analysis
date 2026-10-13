@@ -12,13 +12,15 @@ from utils.domain_IL.dil_train_utils import (
     evaluate_dil, classwise_accuracy, evaluate_domain
 )
 from utils.domain_IL.dil_utils import (
-    StandardDomainIL, DistillationDomainIL, EWC, ExemplarManager, AdaptiveLR
+    StandardDomainIL, DistillationDomainIL, EWC, ExemplarManager
 )
 #from utils.domain_IL.training_modes import get_dil_training_mode
 from utils.domain_IL.dil_model_loader import load_eaml_model_partial, set_finetune_mode
 from utils import run_log
 from utils.eval.predictions import save_predictions
 from utils.il_checks import warn_inactive_terms
+from utils.paper_recipe import eaml_optimizer, EAMLStepLR
+from utils.image_transforms import set_train_augmentation
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -40,8 +42,7 @@ def run_domain_incremental(
     eaml_ckpt_path,
     checkpoint_dir,
     batch_size=16,
-    lr=1e-4,
-    weight_decay=1e-4,
+    lr=1e-3,
     num_epochs=10,
     strategy="distillation",
     temperature=2.0,
@@ -99,8 +100,7 @@ def run_domain_incremental(
     model = set_finetune_mode(model, finetune_mode, unfreeze_depth)
     warn_inactive_terms(model, use_ewc=use_ewc)
 
-    optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, weight_decay=weight_decay)
-    lr_scheduler = AdaptiveLR(optimizer)
+    optimizer = eaml_optimizer(filter(lambda p: p.requires_grad, model.parameters()), lr=lr)
     criterion = torch.nn.CrossEntropyLoss()
 
     # Fisher from the pretrained domain's val split (not test) to avoid test leakage
@@ -145,6 +145,7 @@ def run_domain_incremental(
         # Replay memory: exemplars of the pretrained domain, selected with the base model before adaptation
         exemplar_mgr.update_exemplars(model, dil_loader.get_domain_loaders('train').get(pretrained_domain).dataset, DEVICE)
 
+    lr_scheduler = EAMLStepLR(optimizer, lr, epochs_done=start_epoch - 1)  # EAML paper: x0.5 every 10 epochs
     for epoch in range(start_epoch, num_epochs + 1):
         print(f"Epoch {epoch}/{num_epochs}")
 
@@ -162,7 +163,9 @@ def run_domain_incremental(
             old_model=old_model if isinstance(inc_strategy, DistillationDomainIL) else None,
             use_bias_correction=use_bias_correction,
         )
+        set_train_augmentation(train_loader, True)  # EAML paper augmentation, training only
         train_loss, train_acc = train_one_epoch_dil(**train_args)
+        set_train_augmentation(train_loader, False)
 
         val_loss_tob, val_acc_tob = evaluate_dil(model, {incremental_domain: val_loader}, DEVICE)
         val_loss_rvl, val_acc_rvl = evaluate_dil(model, {pretrained_domain: val_loader_pretrained}, DEVICE)
@@ -233,7 +236,7 @@ if __name__ == "__main__":
     p.add_argument('--eaml_ckpt_path', required=True)
     p.add_argument('--checkpoint_dir', required=True)
     p.add_argument('--batch_size', type=int, default=16)
-    p.add_argument('--lr', type=float, default=1e-4)
+    p.add_argument('--lr', type=float, default=1e-3)
     p.add_argument('--num_epochs', type=int, default=10)
     p.add_argument('--strategy', choices=['standard','distillation'], default='distillation')
     p.add_argument('--temperature', type=float, default=2.0)
@@ -263,7 +266,6 @@ if __name__ == "__main__":
         checkpoint_dir=args.checkpoint_dir,
         batch_size=args.batch_size,
         lr=args.lr,
-        weight_decay=0.0,
         num_epochs=args.num_epochs,
         strategy=args.strategy,
         temperature=args.temperature,
