@@ -6,7 +6,6 @@ import torch.nn.functional as F
 import gc
 from torch.utils.data import DataLoader, ConcatDataset
 from utils.seed import add_seed_arg, set_seed
-from utils.class_IL.cil_utils import AdaptiveLR
 from utils.llmv3.llmv3_model_loader import load_llmv3_checkpoint
 from utils.llmv3.llmv3_il_common import build_cil_train_loader, add_il_args, make_teacher, distill_term, center_classifier_bias, gil as gil_ratio
 from utils import run_log
@@ -19,8 +18,8 @@ from utils.llmv3.llmv3_incremental_utils import (
     ExemplarHandler, expand_classifier, evaluate
 )
 import torch.optim as optim
-import torch.cuda.amp as amp
 from tqdm import tqdm
+from utils.paper_recipe import llmv3_optimizer, FixedLR
 
 def parse_args():
     parser = argparse.ArgumentParser(description="LayoutLMv3 Incremental Training")
@@ -33,7 +32,7 @@ def parse_args():
     parser.add_argument('--base_model_path', required=True)
     parser.add_argument('--checkpoint_dir', default='checkpoints')
     parser.add_argument('--batch_size', type=int, default=8)
-    parser.add_argument('--lr', type=float, default=1e-4)
+    parser.add_argument('--lr', type=float, default=2e-5)
     parser.add_argument('--num_epochs', type=int, default=50)
     parser.add_argument('--use_ewc', action='store_true')
     parser.add_argument('--lambda_ewc', type=float, default=5000.0)
@@ -173,11 +172,10 @@ def main():
 
     ewc = EWC(model, base_train_loader, device, fisher_n=500, lambda_ewc=args.lambda_ewc) if args.use_ewc else None
 
-    optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr, weight_decay=0.01)
+    optimizer = llmv3_optimizer(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr)
 
-    # adaptive lr as in the EAML CIL scripts: lr x0.75 after 3 epochs without val improvement
 
-    lr_sched = AdaptiveLR(optimizer, base_lr=args.lr)
+    lr_sched = FixedLR()  # LayoutLMv3 paper: constant learning rate
 
     start_epoch = 0
     best_val_acc = 0.0
@@ -193,8 +191,6 @@ def main():
 
     print("Training started...")
 
-    # Initialize GradScaler for mixed precision
-    scaler = amp.GradScaler()
 
     # Freeze all layers except last classifier layer as before
     set_training_scope(model, args.training_mode)
@@ -228,27 +224,25 @@ def main():
 
             optimizer.zero_grad()
 
-            with amp.autocast():
-                inputs = {k: v for k, v in batch.items() if k != 'labels'}
-                old_logits = None
-                if teacher_model is not None:
-                    with torch.no_grad():
-                        old_logits = teacher_model(**inputs)
+            inputs = {k: v for k, v in batch.items() if k != 'labels'}
+            old_logits = None
+            if teacher_model is not None:
+                with torch.no_grad():
+                    old_logits = teacher_model(**inputs)
 
-                new_logits_raw = model(**inputs)
+            new_logits_raw = model(**inputs)
 
-                cls_loss = F.cross_entropy(new_logits_raw, batch['labels'])
-                loss = cls_loss
-                if old_logits is not None:
-                    loss = loss + args.lambda_distill * distill_term(new_logits_raw, old_logits, args.temperature)
-                if ewc:
-                    loss += ewc.penalty(model)
+            cls_loss = F.cross_entropy(new_logits_raw, batch['labels'])
+            loss = cls_loss
+            if old_logits is not None:
+                loss = loss + args.lambda_distill * distill_term(new_logits_raw, old_logits, args.temperature)
+            if ewc:
+                loss += ewc.penalty(model)
 
 
-            # Scale loss and backpropagate
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+            # Backpropagate (fp32, as the base model)
+            loss.backward()
+            optimizer.step()
 
             running_loss += loss.item() * batch['labels'].size(0)
             _, predicted = new_logits_raw.max(1)
