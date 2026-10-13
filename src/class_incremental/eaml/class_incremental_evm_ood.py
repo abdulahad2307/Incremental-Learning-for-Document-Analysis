@@ -19,8 +19,7 @@ from utils.class_IL.train_utils import (
     save_checkpoint, load_checkpoint, CILMetrics, evaluate
 )
 from utils.class_IL.cil_utils import (
-    StandardIncremental, DistillationIncremental, EWC, ExemplarManager,
-    AdaptiveLR, extract_features, extract_features_and_logits, extract_feature_vectors, fill_exemplar_memory
+    StandardIncremental, DistillationIncremental, EWC, ExemplarManager, extract_features, extract_features_and_logits, extract_feature_vectors, fill_exemplar_memory
 )
 from utils.class_IL.training_modes import get_training_mode
 from utils import run_log
@@ -34,6 +33,8 @@ from utils.ood.ood_loss import vim_ood_loss
 from utils.evm.evm_state import load_open_set_state, save_open_set_state
 from utils.evm.evm_loss import evm_nll_loss
 from utils.il_checks import warn_inactive_terms
+from utils.paper_recipe import eaml_optimizer, EAMLStepLR
+from utils.image_transforms import set_train_augmentation
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -161,7 +162,6 @@ def run_incremental_learning_evm_ood(
     checkpoint_dir: str,
     batch_size: int = 8,
     lr: float = 1e-3,
-    weight_decay: float = 0.01,
     num_epochs: int = 10,
     strategy: str = "distillation",
     temperature: float = 2.0,
@@ -269,6 +269,7 @@ def run_incremental_learning_evm_ood(
         if model_name == "eaml":
             train_dataset = EAMLClassILDataset(
                 data_dir=os.path.join(data_root, "train"),
+                training_docs=True,
                 current_classes=current_classes,
                 ocr_data_path=ocr_tensor_path,
                 transform=common_transform
@@ -367,9 +368,7 @@ def run_incremental_learning_evm_ood(
         warn_inactive_terms(model, use_ewc=use_ewc, lambda_evm=lambda_evm, lambda_ood=lambda_ood)
 
 
-        optimizer = torch.optim.AdamW(
-            tm.get_trainable_params(), lr=lr, weight_decay=weight_decay
-        )
+        optimizer = eaml_optimizer(tm.get_trainable_params(), lr=lr)
 
 
         if resuming_this_step:
@@ -380,7 +379,7 @@ def run_incremental_learning_evm_ood(
             torch.cuda.empty_cache()
 
 
-        lr_scheduler = AdaptiveLR(optimizer, base_lr=lr)
+        lr_scheduler = EAMLStepLR(optimizer, lr, epochs_done=start_ep)  # EAML paper: x0.5 every 10 epochs
         criterion = nn.CrossEntropyLoss()
 
 
@@ -392,9 +391,11 @@ def run_incremental_learning_evm_ood(
 
 
             metrics = CILMetrics(current_classes)
+            set_train_augmentation(train_loader, True)  # EAML paper augmentation, training only
             train_results = train_one_epoch_evm_ood(
                 model, train_loader, optimizer, criterion, DEVICE, metrics, inc_strategy, evm, ood_vim, lambda_evm, lambda_ood, old_model, ewc if use_ewc else None
             )
+            set_train_augmentation(train_loader, False)
 
 
             val_metrics = CILMetrics(current_classes)
@@ -653,7 +654,6 @@ if __name__ == "__main__":
     p.add_argument('--resume_checkpoint', type=str, default=None)
     p.add_argument('--global_best_acc', type=float, default=0.0)
     p.add_argument('--full_model_acc', type=float, default=None)
-    p.add_argument('--weight_decay', type=float, default=0.01)
     p.add_argument('--patience', type=int, default=10)
     p.add_argument('--use_balanced_sampler', action='store_true')
     p.add_argument('--use_bias_correction', action='store_true')
@@ -697,7 +697,6 @@ if __name__ == "__main__":
         resume_checkpoint=args.resume_checkpoint,
         global_best_acc=args.global_best_acc,
         full_model_acc=args.full_model_acc,
-        weight_decay=args.weight_decay,
         patience=args.patience,
         use_balanced_sampler=args.use_balanced_sampler,
         use_bias_correction=args.use_bias_correction,

@@ -40,7 +40,7 @@ python src/class_incremental/eaml/class_incremental_evm_ood.py \
   --checkpoint_dir "$CKPT_DIR" \
   --ood_method vim \
   --ood_tpr 0.95 \
-  --batch_size 64 \
+  --batch_size 16 \
   --lr 1e-3 \
   --num_epochs 100 \
   --strategy distillation \
@@ -53,7 +53,6 @@ python src/class_incremental/eaml/class_incremental_evm_ood.py \
   --exemplar_selection herding \
   --training_mode last_layer \
   --full_model_acc "$EAML_BASE_11_ACC" \
-  --weight_decay 0.01 \
   --patience 10 \
   --use_balanced_sampler \
   --use_bias_correction \

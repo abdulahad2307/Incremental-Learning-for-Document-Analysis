@@ -40,12 +40,13 @@ python src/class_incremental/llmv3/llmv3_class_incremental_evm_training.py \
   --base_model_path "$BASE_MODEL" \
   --checkpoint_dir "$CKPT_DIR" \
   --batch_size 64 \
-  --lr 1e-3 \
+  --lr 2e-5 \
   --num_epochs 100 \
   --use_ewc \
   --lambda_ewc 5000.0 \
   --strategy "$STRATEGY" \
   --use_bias_correction \
+  --use_balanced_sampler \
   --max_exemplars 20 \
   --exemplar_selection herding \
   --training_mode last_layer \

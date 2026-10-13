@@ -13,12 +13,14 @@ from utils.class_IL.train_utils import (
     save_checkpoint, load_checkpoint, train_one_epoch_cil,train_one_epoch_cil_v2, evaluate, CILMetrics
 )
 from utils.class_IL.cil_utils import (
-    StandardIncremental, DistillationIncremental, EWC, ExemplarManager, AdaptiveLR, fill_exemplar_memory
+    StandardIncremental, DistillationIncremental, EWC, ExemplarManager, fill_exemplar_memory
 )
 from utils.class_IL.training_modes import get_training_mode
 from utils import run_log
 from utils.eval.predictions import save_predictions
 from utils.il_checks import warn_inactive_terms
+from utils.paper_recipe import eaml_optimizer, EAMLStepLR
+from utils.image_transforms import set_train_augmentation
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -38,7 +40,6 @@ def run_incremental_learning(
     checkpoint_dir: str,
     batch_size: int = 8,
     lr: float = 1e-3,
-    weight_decay: float = 0.01,
     num_epochs: int = 10,
     strategy: str = "distillation",
     temperature: float = 2.0,
@@ -142,6 +143,7 @@ def run_incremental_learning(
         if model_name == "eaml":
             train_dataset = EAMLClassILDataset(
                 data_dir=os.path.join(data_root, "train"),
+                training_docs=True,
                 current_classes=current_classes,
                 ocr_data_path=ocr_tensor_path,
                 transform=common_transform
@@ -234,11 +236,7 @@ def run_incremental_learning(
         tm = get_training_mode(model, training_mode, trainable_layers)
         model = tm.prepare_for_training()
         warn_inactive_terms(model, use_ewc=use_ewc)
-        optimizer = torch.optim.AdamW(
-            tm.get_trainable_params(),
-            lr=lr,
-            weight_decay=weight_decay
-        )
+        optimizer = eaml_optimizer(tm.get_trainable_params(), lr=lr)
 
         # Loading optimizer state if resuming
         if resuming_this_step:
@@ -248,13 +246,14 @@ def run_incremental_learning(
             del checkpoint
             torch.cuda.empty_cache()
 
-        lr_sched = AdaptiveLR(optimizer, base_lr=lr)
+        lr_sched = EAMLStepLR(optimizer, lr, epochs_done=this_start_epoch)  # EAML paper: x0.5 every 10 epochs
         criterion = nn.CrossEntropyLoss()
 
         # ----------- TRAINING -----------
         for epoch in range(this_start_epoch, num_epochs):
             print(f"\n= Epoch {epoch+1}/{num_epochs} for Class {new_class} =")
             train_metrics = CILMetrics(current_classes)
+            set_train_augmentation(train_loader, True)  # EAML paper augmentation, training only
             train_result = train_one_epoch_cil_v2(
                 model,
                 train_loader,
@@ -266,6 +265,7 @@ def run_incremental_learning(
                 old_model=old_model,
                 ewc=ewc if use_ewc else None
             )
+            set_train_augmentation(train_loader, False)
             val_metrics = CILMetrics(current_classes)
             val_result = evaluate(model, val_loader, DEVICE, val_metrics, None)
             print(f"Train Loss: {train_result['loss']:.4f} | Train Acc: {train_result['top1_acc']:.4f}")
@@ -423,7 +423,7 @@ if __name__ == "__main__":
     p.add_argument('--model_name', choices=['eaml', 'docformer'], required=True)
     p.add_argument('--checkpoint_dir', required=True)
     p.add_argument('--batch_size', type=int, default=8)
-    p.add_argument('--lr', type=float, default=2e-5)
+    p.add_argument('--lr', type=float, default=1e-3)
     p.add_argument('--num_epochs', type=int, default=10)
     p.add_argument('--strategy', choices=['standard','distillation'], default='distillation')
     p.add_argument('--temperature', type=float, default=2.0)
@@ -442,7 +442,6 @@ if __name__ == "__main__":
     p.add_argument('--resume_checkpoint', type=str, default=None)
     p.add_argument('--global_best_acc', type=float, default=0.0)
     p.add_argument('--full_model_acc', type=float, default=None)
-    p.add_argument('--weight_decay', type=float, default=0.01)
     #p.add_argument('--test_interval', type=int, default=20)
     p.add_argument('--patience', type=int, default=10)
     add_seed_arg(p)
@@ -479,6 +478,5 @@ if __name__ == "__main__":
         resume_checkpoint=args.resume_checkpoint,
         global_best_acc=args.global_best_acc,
         full_model_acc=args.full_model_acc,
-        weight_decay=args.weight_decay,
         patience=args.patience
     )

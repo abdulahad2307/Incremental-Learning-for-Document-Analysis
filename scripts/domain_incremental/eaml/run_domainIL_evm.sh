@@ -36,11 +36,19 @@ python src/domain_incremental/eaml/domain_incremental_evm.py \
   --eaml_ckpt_path "$EAML_BASE_16" \
   --checkpoint_dir "$CKPT_DIR" \
   --batch_size 16 \
-  --num_epochs 300 \
-  --lr 1e-4 \
+  --num_epochs 100 \
+  --strategy distillation \
+  --lambda_ewc 5000 \
+  --use_ewc \
+  --use_exemplars \
+  --max_exemplars 320 \
+  --exemplar_selection herding \
+  --use_bias_correction \
+  --patience 10 \
+  --lr 1e-3 \
   --finetune_mode last_layer \
   --unfreeze_depth 2 \
-  --evm_tailsize 0.5 \
+  --evm_tailsize 0.3 \
   --evm_threshold 0.7 \
   ${RESUME_CKPT:+--resume --resume_ckpt_path "$RESUME_CKPT"}
 

@@ -9,6 +9,7 @@ from transformers import BertTokenizer
 
 from utils.llmv3.llmv3_data_loader import get_dataloaders, CILLayoutLMv3Dataset, layoutlmv3_cil_collate_fn
 from utils.image_transforms import normalize
+from utils.data_subset import base_training_documents
 
 common_transform = transforms.Compose([
     transforms.Resize((229, 229)),
@@ -22,8 +23,11 @@ def _normalize_class_name(name):
 
 # ========================== EAML Dataset for Class IL ==========================
 class EAMLClassILDataset(Dataset):
-    def __init__(self, data_dir, current_classes, ocr_data_path=None, transform=None, img_size=229, handle_empty_text="exclude", fallback_text="[EMPTY]"):
+    def __init__(self, data_dir, current_classes, ocr_data_path=None, transform=None, img_size=229, handle_empty_text="exclude", fallback_text="[EMPTY]",
+                 training_docs=False):
+        """training_docs=True: only the base models' training documents of each class (training data of a step)."""
         self.data_dir = data_dir
+        self.training_docs = training_docs
         self.current_classes = [cls.strip().strip('"').strip("'") for cls in current_classes]
         self.transform = transform
         self.img_size = img_size
@@ -75,33 +79,35 @@ class EAMLClassILDataset(Dataset):
             if not os.path.isdir(class_dir):
                 print(f"Warning: Directory for class '{class_name}' not found at {class_dir}")
                 continue
-            for fname in os.listdir(class_dir):
-                if fname.lower().endswith((".png", ".jpg", ".jpeg", ".tif")):
-                    img_path = os.path.join(class_dir, fname)
-                    ocr_entry = self._get_ocr_entry(img_path)
-                    if ocr_entry is None:
-                        print(f"Warning: No OCR data found for {img_path}")
-                        continue
-                    if self.ocr_tokenized:
-                        tokens = {
-                            "input_ids": torch.tensor(ocr_entry["input_ids"]),
-                            #"input_ids": ocr_entry["input_ids"].detach().clone(), <== use this for EVM +OOD
-                            "attention_mask": torch.tensor(ocr_entry["attention_mask"])
-                            #"attention_mask": ocr_entry["attention_mask"].detach().clone(), <== use this for EVM +OOD to ensures a safe copy of the tensor without gradient tracking.
-                        }
-                    else:
-                        text = ocr_entry
-                        if not text or (isinstance(text, str) and len(text.strip()) == 0):
-                            if self.handle_empty_text == "exclude":
-                                continue
-                            elif self.handle_empty_text == "fallback":
-                                text = self.fallback_text
-                        tokens_raw = self.tokenizer(text, padding="max_length", truncation=True, max_length=128, return_tensors="pt")
-                        tokens = {
-                            "input_ids": tokens_raw["input_ids"].squeeze(0),
-                            "attention_mask": tokens_raw["attention_mask"].squeeze(0)
-                        }
-                    self.samples.append((img_path, tokens, class_name))
+            paths = sorted(os.path.join(class_dir, f) for f in os.listdir(class_dir)
+                           if f.lower().endswith((".png", ".jpg", ".jpeg", ".tif")))
+            if self.training_docs:  # the base models' training documents of this class (utils/data_subset.py)
+                paths = base_training_documents(paths, class_name)
+            for img_path in paths:
+                ocr_entry = self._get_ocr_entry(img_path)
+                if ocr_entry is None:
+                    print(f"Warning: No OCR data found for {img_path}")
+                    continue
+                if self.ocr_tokenized:
+                    tokens = {
+                        "input_ids": torch.tensor(ocr_entry["input_ids"]),
+                        #"input_ids": ocr_entry["input_ids"].detach().clone(), <== use this for EVM +OOD
+                        "attention_mask": torch.tensor(ocr_entry["attention_mask"])
+                        #"attention_mask": ocr_entry["attention_mask"].detach().clone(), <== use this for EVM +OOD to ensures a safe copy of the tensor without gradient tracking.
+                    }
+                else:
+                    text = ocr_entry
+                    if not text or (isinstance(text, str) and len(text.strip()) == 0):
+                        if self.handle_empty_text == "exclude":
+                            continue
+                        elif self.handle_empty_text == "fallback":
+                            text = self.fallback_text
+                    tokens_raw = self.tokenizer(text, padding="max_length", truncation=True, max_length=128, return_tensors="pt")
+                    tokens = {
+                        "input_ids": tokens_raw["input_ids"].squeeze(0),
+                        "attention_mask": tokens_raw["attention_mask"].squeeze(0)
+                    }
+                self.samples.append((img_path, tokens, class_name))
 
     def __len__(self):
         return len(self.samples)
@@ -303,6 +309,8 @@ def get_class_loader_for_class(class_name: str, dataset, batch_size: int, device
         batch_size=batch_size,
         shuffle=False,  # no shuffle for feature extraction
         num_workers=2,
-        collate_fn=dataset.collate_fn if hasattr(dataset, 'collate_fn') else None
+        # EAMLClassILDataset items need eaml_collate_fn (batch keys images / texts / labels, as extract_feature_vectors
+        # expects); the default collate would produce image / text / label and fail
+        collate_fn=getattr(dataset, 'collate_fn', None) or (eaml_collate_fn if isinstance(dataset, EAMLClassILDataset) else None)
     )
     return loader

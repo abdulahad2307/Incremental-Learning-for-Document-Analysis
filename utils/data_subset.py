@@ -54,3 +54,15 @@ def split_indices(sample_paths, root, split, fractions=SPLIT_FRACTIONS, seed=DEF
     """Indices of the samples (given by their image paths) that belong to `split` of split_documents(root)."""
     keep = split_documents(root, fractions, seed)[split]
     return [i for i, p in enumerate(sample_paths) if _rel(p) in keep]
+
+
+TRAIN_IMAGES_PER_CLASS = 12500   # training documents per class of every base model (scripts/base_models, --images_per_class)
+
+
+def base_training_documents(paths, class_name, n=None):
+    """The base models' training documents of a class: TRAIN_IMAGES_PER_CLASS of `paths`, chosen exactly as the base
+    loaders choose them (select_per_class with the default seed, independent of the run seed). With n, a reproducible
+    n-subset of them (e.g. an exemplar candidate pool). The incremental steps train on and replay from these, so every
+    backbone learns from the same documents as its base model and as the other backbone."""
+    docs = select_per_class(paths, TRAIN_IMAGES_PER_CLASS, DEFAULT_SEED, class_name)
+    return docs if n is None or n >= len(docs) else select_per_class(docs, n, DEFAULT_SEED, class_name)

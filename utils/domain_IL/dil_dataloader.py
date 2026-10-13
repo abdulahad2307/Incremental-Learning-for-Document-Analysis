@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 from PIL import Image, UnidentifiedImageError
 from sklearn.model_selection import StratifiedShuffleSplit
 
-from utils.data_subset import split_indices
+from utils.data_subset import split_indices, base_training_documents
 from utils.image_transforms import normalize
 
 common_transform = transforms.Compose([
@@ -224,6 +224,13 @@ class DILDataLoader:
 
             if os.path.exists(domain_phase_path):
                 ds = EAMLDocumentDataset(domain_phase_path, transform=self.transform, ocr_tensor_dir=ocr_dir, class_to_idx=self.class_to_idx)
+                if phase == "train":  # pretrained domain: the base model's training documents (utils/data_subset.py)
+                    keep = set()
+                    for c in {os.path.basename(os.path.dirname(p)) for p, _ in ds.samples}:
+                        keep.update(base_training_documents([p for p, _ in ds.samples
+                                                             if os.path.basename(os.path.dirname(p)) == c], c))
+                    ds.samples = ds.imgs = [(p, y) for p, y in ds.samples if p in keep]
+                    ds.targets = [y for _, y in ds.samples]
                 if len(ds) == 0:
                     continue
                 loaders[domain] = DataLoader(

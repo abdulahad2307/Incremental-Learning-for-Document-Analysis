@@ -14,7 +14,7 @@ from utils.class_IL.train_utils import (
     save_checkpoint, load_checkpoint, train_one_epoch_cil, evaluate, CILMetrics
 )
 from utils.class_IL.cil_utils import (
-    StandardIncremental, DistillationIncremental, EWC, ExemplarManager, AdaptiveLR, extract_features, extract_features_and_logits, fill_exemplar_memory
+    StandardIncremental, DistillationIncremental, EWC, ExemplarManager, extract_features, extract_features_and_logits, fill_exemplar_memory
 )
 from utils.class_IL.training_modes import get_training_mode
 from utils import run_log
@@ -22,6 +22,8 @@ from utils.eval.predictions import save_predictions
 
 from utils.ood.ood_eval import make_detector, evaluate_ood
 from utils.il_checks import warn_inactive_terms
+from utils.paper_recipe import eaml_optimizer, EAMLStepLR
+from utils.image_transforms import set_train_augmentation
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -40,7 +42,6 @@ def run_incremental_learning_ood(
     ood_method: str = "msp",
     batch_size: int = 8,
     lr: float = 1e-3,
-    weight_decay: float = 0.01,
     num_epochs: int = 10,
     strategy: str = "distillation",
     temperature: float = 2.0,
@@ -135,6 +136,7 @@ def run_incremental_learning_ood(
         if model_name == "eaml":
             train_dataset = EAMLClassILDataset(
                 data_dir=os.path.join(data_root, "train"),
+                training_docs=True,
                 current_classes=current_classes,
                 ocr_data_path=ocr_tensor_path,
                 transform=common_transform
@@ -228,11 +230,7 @@ def run_incremental_learning_ood(
         tm = get_training_mode(model, training_mode, trainable_layers)
         model = tm.prepare_for_training()
         warn_inactive_terms(model, use_ewc=use_ewc)
-        optimizer = torch.optim.AdamW(
-            tm.get_trainable_params(),
-            lr=lr,
-            weight_decay=weight_decay
-        )
+        optimizer = eaml_optimizer(tm.get_trainable_params(), lr=lr)
         if resuming_this_step:
             checkpoint = torch.load(resume_checkpoint, map_location=DEVICE,weights_only=False)
             if 'optimizer_state_dict' in checkpoint:
@@ -240,13 +238,14 @@ def run_incremental_learning_ood(
             del checkpoint
             torch.cuda.empty_cache()
 
-        lr_sched = AdaptiveLR(optimizer, base_lr=lr)
+        lr_sched = EAMLStepLR(optimizer, lr, epochs_done=this_start_epoch)  # EAML paper: x0.5 every 10 epochs
         criterion = nn.CrossEntropyLoss()
 
         # ----------- TRAINING -----------
         for epoch in range(this_start_epoch, num_epochs):
             print(f"\n= Epoch {epoch+1}/{num_epochs} for Class {new_class} =")
             train_metrics = CILMetrics(current_classes)
+            set_train_augmentation(train_loader, True)  # EAML paper augmentation, training only
             train_result = train_one_epoch_cil(
                 model,
                 train_loader,
@@ -258,6 +257,7 @@ def run_incremental_learning_ood(
                 old_model=old_model,
                 ewc=ewc if use_ewc else None
             )
+            set_train_augmentation(train_loader, False)
             val_metrics = CILMetrics(current_classes)
             val_result = evaluate(model, val_loader, DEVICE, val_metrics, None)
             print(f"Train Loss: {train_result['loss']:.4f} | Train Acc: {train_result['top1_acc']:.4f}")
@@ -395,7 +395,7 @@ def run_incremental_learning_ood(
         val_loader_full = get_class_il_loader(model_name, os.path.join(data_root, "val"),
                                              learned_classes, batch_size, ocr_data=ocr_tensor_path)
         test_loader_full = get_class_il_loader(model_name, os.path.join(data_root, "test"),
-                                              learned_classes, batch_size, ocr_tensor_path)
+                                              learned_classes, batch_size, ocr_data=ocr_tensor_path)
         def evaluate_with_metrics(split_name, loader):
             eval_metrics_eval = CILMetrics(class_names=learned_classes.copy())
             results = evaluate(final_model, loader, DEVICE, eval_metrics_eval, full_model_acc)
@@ -444,7 +444,7 @@ if __name__ == "__main__":
     p.add_argument('--model_name', choices=['eaml', 'docformer'], required=True)
     p.add_argument('--checkpoint_dir', required=True)
     p.add_argument('--batch_size', type=int, default=8)
-    p.add_argument('--lr', type=float, default=2e-5)
+    p.add_argument('--lr', type=float, default=1e-3)
     p.add_argument('--num_epochs', type=int, default=10)
     p.add_argument('--strategy', choices=['standard','distillation'], default='distillation')
     p.add_argument('--temperature', type=float, default=2.0)
@@ -461,7 +461,6 @@ if __name__ == "__main__":
     p.add_argument('--resume_checkpoint', type=str, default=None)
     p.add_argument('--global_best_acc', type=float, default=0.0)
     p.add_argument('--full_model_acc', type=float, default=None)
-    p.add_argument('--weight_decay', type=float, default=0.01)
     p.add_argument('--patience', type=int, default=10)
     p.add_argument('--use_balanced_sampler', action='store_true')
     p.add_argument('--use_bias_correction', action='store_true')
@@ -501,7 +500,6 @@ if __name__ == "__main__":
         resume_checkpoint=args.resume_checkpoint,
         global_best_acc=args.global_best_acc,
         full_model_acc=args.full_model_acc,
-        weight_decay=args.weight_decay,
         patience=args.patience,
         use_balanced_sampler=args.use_balanced_sampler,
         use_bias_correction=args.use_bias_correction,

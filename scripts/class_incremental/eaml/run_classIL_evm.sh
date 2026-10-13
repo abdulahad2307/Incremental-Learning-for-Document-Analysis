@@ -37,7 +37,7 @@ python src/class_incremental/eaml/class_incremental_evm.py \
   --all_classes "$ALL_CLASSES" \
   --base_classes "$BASE_CLASSES" \
   --unseen_classes "$UNSEEN_CLASSES" \
-  --batch_size 64 \
+  --batch_size 16 \
   --lr 1e-3 \
   --num_epochs 100 \
   --strategy distillation \
@@ -46,6 +46,8 @@ python src/class_incremental/eaml/class_incremental_evm.py \
   --lambda_ewc 5000.0 \
   --use_ewc \
   --use_exemplars \
+  --use_bias_correction \
+  --use_balanced_sampler \
   --max_exemplars 320 \
   --exemplar_selection herding \
   --training_mode last_layer \

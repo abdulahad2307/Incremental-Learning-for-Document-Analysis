@@ -1,14 +1,10 @@
-import os
-import gc
 import torch
 from torch.utils.data import Dataset, DataLoader,Subset
 from pathlib import Path
 from PIL import Image, UnidentifiedImageError
 import torchvision.transforms as T
-import random
-import numpy as np
 
-from utils.data_subset import split_indices
+from utils.data_subset import split_indices, base_training_documents, select_per_class, DEFAULT_SEED
 from utils.image_transforms import normalize
 
 def poly8_to_bbox4(poly):
@@ -52,7 +48,6 @@ class IncrementalOCRTensorsDataset(Dataset):
         self.dataset_name = dataset_name
 
         # Collect samples: tuples of (image_path, None, class_name)
-        random.seed(seed)
         self.samples = []
         print(f"Looking for classes: {included_classes}")
         for class_name in included_classes:
@@ -71,16 +66,16 @@ class IncrementalOCRTensorsDataset(Dataset):
 
             #images = list(class_dir.glob("*.*"))
             valid_extensions = ['.jpg', '.jpeg', '.png', '.tiff','.tif', '.bmp']
-            images = [img for img in class_dir.iterdir() if img.suffix.lower() in valid_extensions]
+            images = sorted(img for img in class_dir.iterdir() if img.suffix.lower() in valid_extensions)
+            if split == "train":  # the base models' training documents (utils/data_subset.py), optionally n of them
+                images = [Path(p) for p in base_training_documents(images, class_name, images_per_class)]
+            elif images_per_class:
+                images = [Path(p) for p in select_per_class(images, images_per_class, DEFAULT_SEED, class_name)]
             # Skip images without an OCR file (unreadable images get none), as the base-model loader does
             no_ocr = [img for img in images if not (self.ocr_tensor_dir / (img.stem + ".pt")).exists()]
             if no_ocr:
                 print(f"Skipping {len(no_ocr)} image(s) in {class_dir} without OCR file, e.g. {no_ocr[0].name}")
                 images = [img for img in images if img not in set(no_ocr)]
-            if images_per_class:
-                images = random.sample(images, min(images_per_class, len(images)))
-            else:
-                images = random.sample(images, len(images))
 
             for img_path in images:
                 self.samples.append((img_path, None, class_name))

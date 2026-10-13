@@ -39,9 +39,9 @@ python src/domain_incremental/llmv3/llmv3_domain_incremental_ievm_training.py \
   --dataset_inc tobacco3482 \
   --base_model_path "$LLMV3_BASE_16" \
   --checkpoint_dir "$CKPT_DIR" \
-  --batch_size 32 \
-  --lr 1e-3 \
-  --num_epochs 50 \
+  --batch_size 64 \
+  --lr 2e-5 \
+  --num_epochs 100 \
   --use_ewc \
   --lambda_ewc 5000.0 \
   --strategy "$STRATEGY" \

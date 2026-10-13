@@ -96,7 +96,7 @@ class EAMLModel(nn.Module):
         image_map, text_seq = self.attention_block(image_map, text_seq, text_mask)
         return self.image_encoder.rest(image_map), self.text_encoder.rest(text_seq, ext_mask)
 
-    def extract_features(self, images, texts, input_ids=None, attention_mask=None):
+    def extract_features(self, images, texts=None, input_ids=None, attention_mask=None):
         """
         Extract fused features - used during exemplar herding.
         Args same as forward.
