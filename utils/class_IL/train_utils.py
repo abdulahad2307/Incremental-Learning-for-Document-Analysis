@@ -1,4 +1,5 @@
 import os
+import re
 import torch
 import time
 import torch
@@ -130,6 +131,16 @@ def save_checkpoint(model, optimizer, epoch, path, extra_data=None):
         state.update(extra_data)
     torch.save(state, path)
     print(f"Checkpoint saved to {path}")
+
+
+def prune_epoch_checkpoints(checkpoint_dir, new_class, keep):
+    """Delete this step's older epoch checkpoints (epoch<N>_<new class>.pth) and keep only `keep`, the newest one,
+    for resuming. The best models of all steps (best_model_<class>.pth) are not touched."""
+    for fname in os.listdir(checkpoint_dir):
+        path = os.path.join(checkpoint_dir, fname)
+        if (re.fullmatch(rf"epoch\d+_{re.escape(new_class)}\.pth", fname)
+                and os.path.abspath(path) != os.path.abspath(keep)):
+            os.remove(path)
 
 """
 def load_checkpoint(model, optimizer, path, device):

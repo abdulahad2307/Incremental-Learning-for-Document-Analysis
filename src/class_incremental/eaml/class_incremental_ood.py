@@ -18,6 +18,7 @@ from utils.class_IL.cil_utils import (
 )
 from utils.class_IL.training_modes import get_training_mode
 from utils import run_log
+from utils.class_IL.train_utils import prune_epoch_checkpoints
 from utils.eval.predictions import save_predictions
 
 from utils.ood.ood_eval import make_detector, evaluate_ood
@@ -298,6 +299,7 @@ def run_incremental_learning_ood(
                         "unseen_class": new_class,
                     },
                 )
+                prune_epoch_checkpoints(checkpoint_dir, new_class, keep=last_epoch_path)  # disk: one epoch checkpoint per step
             else:
                 this_epochs_no_improve += 1
                 print(f"Patience counter: {this_epochs_no_improve}/{patience}")
@@ -310,6 +312,7 @@ def run_incremental_learning_ood(
                     "step_best_acc": this_step_best_acc,
                     "step_best_path": this_step_best_path
                 })
+                prune_epoch_checkpoints(checkpoint_dir, new_class, keep=last_epoch_path)  # disk: one epoch checkpoint per step
                 if this_epochs_no_improve >= patience:
                     print(f"Early stopping at epoch {epoch+1} due to no improvement in val accuracy for {patience} epochs.")
                     break
@@ -390,10 +393,6 @@ def run_incremental_learning_ood(
             # Bias correction on the evaluated model: the step checkpoint holds the model before the correction
             with torch.no_grad():
                 final_model.fusion_classifier.bias -= final_model.fusion_classifier.bias.mean()
-        train_loader_full = get_class_il_loader(model_name, os.path.join(data_root, "train"),
-                                               learned_classes, batch_size, ocr_data=ocr_tensor_path)
-        val_loader_full = get_class_il_loader(model_name, os.path.join(data_root, "val"),
-                                             learned_classes, batch_size, ocr_data=ocr_tensor_path)
         test_loader_full = get_class_il_loader(model_name, os.path.join(data_root, "test"),
                                               learned_classes, batch_size, ocr_data=ocr_tensor_path)
         def evaluate_with_metrics(split_name, loader):
@@ -417,8 +416,6 @@ def run_incremental_learning_ood(
                     for clss, cacc in zip(learned_classes, class_wise_acc):
                         print(f"  {clss}: {cacc:.4f}")
             torch.cuda.empty_cache()
-        evaluate_with_metrics("Train", train_loader_full)
-        evaluate_with_metrics("Validation", val_loader_full)
         evaluate_with_metrics("Test", test_loader_full)
 
         # Per-document predictions of this step: test documents of the learned and of the not-yet-learned classes

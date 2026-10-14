@@ -97,7 +97,12 @@ def init(backbone, setting, method, args=None, **fields):
         "strategy": fields.pop("strategy", cfg.get("strategy", "")),
         "bias_correction": fields.pop("bias_correction", cfg.get("use_bias_correction", "")),
         "seed": fields.pop("seed", cfg.get("seed", "")),
+        # global step of a CIL array task (scripts/config.sh cil_step); every row of the run carries it
+        "step": os.environ.get("IL_STEP", ""),
     }
+    unseen = cfg.get("unseen_classes")
+    if setting == "CIL" and unseen:  # the class this CIL job adds, on every row (also the scripts' final rows)
+        _run["new_class"] = ",".join(unseen) if isinstance(unseen, (list, tuple)) else str(unseen)
     _run.update(fields)
 
     path = _table_path()
@@ -117,6 +122,8 @@ def log(phase, **metrics):
     if _run is None:
         init(backbone="", setting="", method="")
     row = dict(_run)
+    if row.get("step") not in ("", None):  # the global step wins over a script's own step counter (1 within each job)
+        metrics.pop("step", None)
     row["timestamp"] = datetime.datetime.now().isoformat(timespec="seconds")
     row["phase"] = phase
     extra = {}

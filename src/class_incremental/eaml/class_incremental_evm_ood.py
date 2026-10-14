@@ -577,8 +577,6 @@ def run_incremental_learning_evm_ood(
         torch.cuda.empty_cache()
 
 
-        train_loader_full = get_class_il_loader(model_name, os.path.join(data_root, "train"), learned_classes, batch_size, ocr_data=ocr_tensor_path)
-        val_loader_full = get_class_il_loader(model_name, os.path.join(data_root, "val"), learned_classes, batch_size, ocr_data=ocr_tensor_path)
         test_loader_full = get_class_il_loader(model_name, os.path.join(data_root, "test"), learned_classes, batch_size, ocr_data=ocr_tensor_path)
 
 
@@ -603,8 +601,6 @@ def run_incremental_learning_evm_ood(
             torch.cuda.empty_cache()
 
 
-        evaluate_print("Train", train_loader_full)
-        evaluate_print("Validation", val_loader_full)
         evaluate_print("Test", test_loader_full)
 
         # Per-document predictions of this step: test documents of the learned and of the not-yet-learned classes
