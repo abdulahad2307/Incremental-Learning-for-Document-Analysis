@@ -433,6 +433,28 @@ python tools/eval/il_results_table.py --backbone eaml --setting CIL --out result
 python tools/eval/il_results_table.py --phase epoch --run-id <run_id>  # training curve of one run
 ```
 
+#### Paper tables from the predictions
+
+`tools/eval/build_results.py` computes every metric from the saved predictions (`utils/metrics/`), so no run has to be repeated:
+
+```bash
+module load python/3.12-conda && conda activate mtil
+python tools/eval/build_results.py --out_dir results/journal            # all backbones; --backbone eaml llmv3hf to filter
+```
+
+| Output | Content |
+|---|---|
+| `cil_runs.csv`, `dil_runs.csv` | one row per run (seed) |
+| `cil_summary.csv`, `dil_summary.csv` | mean / std over seeds per backbone × method × strategy (× steps for CIL) |
+| `cil_accuracy_matrices.json` | accuracy matrix `A[k][j]` of every CIL run (task 0 = base classes, task j = class of step j) |
+| `results.md` | the paper tables (%) |
+
+Metrics:
+- **CIL** (step 0 = base model, read from `run_base_predictions.sh`'s files): accuracy after each step, average incremental accuracy (mean over steps 0..K), forgetting (Chaudhry et al., 2018), backward transfer (Lopez-Paz & Ranzato, 2017), G_IL against the base model, accuracy on old classes and on the newest class, macro-F1. A run is evaluated up to its first missing step (`complete` = False if later steps exist).
+- **Open set** (CIL, steps 1..K): the test documents of the classes not learned yet are the unknowns. AUROC, FPR at 95 % TPR and OSCR (Dhamija et al., 2018) for the softmax (`msp`), the EVM probabilities (`evm`) and the OOD score (`ood`), whichever the method has; averaged over the steps that have unknowns.
+- **DIL**: accuracy on RVL-CDIP and Tobacco-3482 before (base model) and after adaptation, forgetting on RVL-CDIP, macro-F1 per domain **over the classes present in that domain** (the F1 in the training logs averages over all 18 classes and is too low for Tobacco), and domain-shift AUROC (RVL-CDIP known vs Tobacco unknown).
+- **Statistics**: mean ± std over seeds, 95 % bootstrap interval of the final accuracy over test documents, and an exact McNemar test of every method against No EVM with the same backbone, strategy, seed and steps, on the same test documents (`p_vs_noevm_*`).
+
 #### Per-document predictions
 
 Every IL job also saves the per-document outputs of its final model on the test sets, so all metrics (accuracy matrix, forgetting, BWT, open-set AUROC / FPR95 / OSCR, confidence intervals, paired tests between methods) can be computed later without retraining (`utils/eval/predictions.py`):
