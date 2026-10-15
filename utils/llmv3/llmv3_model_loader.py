@@ -32,6 +32,16 @@ class VisionEncoder(nn.Module):
         x = self.norm(x)
         return x  # (B, num_patches+1, hidden_size)
 
+def pool_modalities(seq, attention_mask):
+    """(text, visual) features from a LayoutLMv3 output sequence [text tokens | visual [CLS] | image patches]:
+    the mean over the real text tokens (padding masked out) and the mean over the image patches."""
+    n_text = attention_mask.shape[1]
+    m = attention_mask.unsqueeze(-1).to(seq.dtype)
+    text = (seq[:, :n_text] * m).sum(dim=1) / m.sum(dim=1).clamp(min=1)
+    visual = seq[:, n_text + 1:].mean(dim=1)
+    return text, visual
+
+
 class CustomLayoutLMv3(nn.Module):
     """Custom LayoutLMv3-style model ("Custom LLMv3"), used in the thesis and the workshop paper: bert-base-uncased
     text encoder + box-centre layout embedding, a timm ViT, and a 2-layer fusion transformer, trained from these
@@ -107,12 +117,8 @@ class CustomLayoutLMv3(nn.Module):
         """Document-level features before the classifier layer, without gradients. Shape [batch_size, hidden_size]."""
         return self.forward_features(input_ids, bbox, attention_mask, pixel_values)
 
-    def forward_features(self, input_ids, bbox, attention_mask, pixel_values):
-        """
-        Extract document-level features before the classifier layer (keeps the autograd graph, for losses on features).
-        Returns:
-            torch.FloatTensor: shape [batch_size, hidden_size]
-        """
+    def _fusion_output(self, input_ids, bbox, attention_mask, pixel_values):
+        """Output sequence of the fusion transformer: [text+layout tokens | ViT [CLS] | image patches]."""
         # Text path
         self._check_token_ids(input_ids)
         text_out = self.text_encoder(input_ids=input_ids, attention_mask=attention_mask)
@@ -137,9 +143,20 @@ class CustomLayoutLMv3(nn.Module):
         #combined = combined.permute(1, 0, 2)
         fused_out = self.fusion_transformer(combined)#.permute(1, 0, 2)  # (B, seq_concat, hidden)
 
-        # Take the [CLS] token (first one) as the global document representation
-        cls_token_embed = fused_out[:, 0]  # [B, hidden_size]
-        return cls_token_embed
+        return fused_out
+
+    def forward_features(self, input_ids, bbox, attention_mask, pixel_values):
+        """Document-level features before the classifier layer: the [CLS] token of the fusion transformer (keeps the
+        autograd graph, for losses on features). Shape [batch_size, hidden_size]."""
+        return self._fusion_output(input_ids, bbox, attention_mask, pixel_values)[:, 0]
+
+    @torch.no_grad()
+    def modality_features(self, input_ids, bbox, attention_mask, pixel_values):
+        """Per-modality document features for MEVM: {'text', 'visual', 'cls'} from the fusion transformer output;
+        'cls' equals extract_features()."""
+        seq = self._fusion_output(input_ids, bbox, attention_mask, pixel_values)
+        text, visual = pool_modalities(seq, attention_mask)
+        return {"text": text, "visual": visual, "cls": seq[:, 0]}
 
 
 # Old name of CustomLayoutLMv3, kept so existing imports and checkpoints keep working.
@@ -199,6 +216,14 @@ class HFLayoutLMv3(nn.Module):
         """Document features before the classifier layer: tanh(dense(dropout([CLS]))) (keeps the autograd graph)."""
         cls_token = self._encode(input_ids, bbox, attention_mask, pixel_values)[:, 0]
         return torch.tanh(self.dense(self.dropout(cls_token)))
+
+    @torch.no_grad()
+    def modality_features(self, input_ids, bbox, attention_mask, pixel_values):
+        """Per-modality document features for MEVM: {'text', 'visual', 'cls'} from the last hidden state;
+        'cls' is the classifier input (MLP head output) and equals extract_features()."""
+        seq = self._encode(input_ids, bbox, attention_mask, pixel_values)
+        text, visual = pool_modalities(seq, attention_mask)
+        return {"text": text, "visual": visual, "cls": torch.tanh(self.dense(self.dropout(seq[:, 0])))}
 
 
 def build_llmv3_model(model_type="custom", num_labels=16, text_model_name="bert-base-uncased",
