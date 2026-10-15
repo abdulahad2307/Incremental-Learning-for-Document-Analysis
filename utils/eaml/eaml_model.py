@@ -96,6 +96,16 @@ class EAMLModel(nn.Module):
         image_map, text_seq = self.attention_block(image_map, text_seq, text_mask)
         return self.image_encoder.rest(image_map), self.text_encoder.rest(text_seq, ext_mask)
 
+    @torch.no_grad()
+    def modality_features(self, images, texts=None, input_ids=None, attention_mask=None):
+        """Per-modality document features for MEVM: {'image', 'text', 'fused'}; 'fused' (= image + text, the EAML
+        fusion) equals extract_features()."""
+        if texts is None:
+            texts = {"input_ids": input_ids,
+                     "attention_mask": attention_mask if attention_mask is not None else torch.ones_like(input_ids)}
+        image_feat, text_feat = self._encode(images, texts)
+        return {"image": image_feat, "text": text_feat, "fused": self.fusion_module(image_feat, text_feat)}
+
     def extract_features(self, images, texts=None, input_ids=None, attention_mask=None):
         """
         Extract fused features - used during exemplar herding.

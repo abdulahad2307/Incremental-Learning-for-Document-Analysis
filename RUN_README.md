@@ -479,6 +479,41 @@ Feature vectors are not stored; the drift analysis will save them for a fixed su
 
 All validation and test sets are the full splits, for both backbones (LayoutLMv3 CIL used a random 1,250 documents per class, drawn per seed, until Oct 2026). EAML CIL now evaluates the test set once per step, with the step's best model and bias correction; before Oct 2026 it logged a `step_test` row at every validation improvement and its reported results did not include the bias correction.
 
+#### MEVM post-hoc go / no-go
+
+The Multivariate EVM (`utils/evm/mevm_classifier.py`, `JOURNAL_EXTENSION_PLAN.md` section B) fits one Weibull per extreme vector and modality and joins them with a Gumbel copula: −log Ψ_i(x) = ‖(t_i1, …, t_im)‖_θ, with t_ij the per-modality EVM energy and θ = 1 / (1 − Kendall's τ) of the modality margins, per class (θ = 1: product of the modality inclusions; θ → ∞: their minimum; m = 1: classic EVM). `mevm_nll_loss` is the drop-in for `evm_nll_loss`. Before any MEVM training, it is compared with EVM on cached features of existing checkpoints, with no training:
+
+```bash
+# from the repo root; an RTX 3080 is enough (8-16 min per checkpoint)
+sbatch scripts/eval/run_extract_features.sh eaml base               # 11-class base model (step 0)
+sbatch scripts/eval/run_extract_features.sh eaml step1              # CIL step 1, No EVM / standard
+sbatch --export=LLMV3_MODEL=hf scripts/eval/run_extract_features.sh llmv3 base
+sbatch --export=LLMV3_MODEL=hf scripts/eval/run_extract_features.sh llmv3 step1
+
+module load python/3.12-conda && conda activate mtil                # CPU, ~3 min per file
+F=$RUN_ROOT/features
+python tools/eval/posthoc_evt.py $F/eaml/*.pt $F/llmv3hf/*.pt --out $F/posthoc
+python tools/eval/posthoc_evt.py --rejudge $F/posthoc/posthoc_evt.json --auroc_gain 0 --acc_loss 0.02 --out <dir>   # other thresholds
+```
+
+- **Features** (`tools/eval/extract_step_features.py`, `model.modality_features()`): EAML image / text / fused; LayoutLMv3 text (mean over the text tokens), visual (mean over the patch tokens) and cls (the classifier's input). They are saved in `$RUN_ROOT/features/<eaml|llmv3|llmv3hf>/<base|step1>_cil.pt` for 200 base training documents per known class (the EVM training data) and for all test documents of the known classes and of the classes not learned yet.
+- **Models**: EVM on the joint feature (EAML fused, LayoutLMv3 cls, as in the IL methods), MEVM on all modalities, MEVM with θ = 1, EVM on each single modality, and the softmax. All use tail size 0.3 and 50 extreme vectors per class. They are scored by the uncapped log inclusion probability, because the probability itself underflows to a common floor far from all extreme vectors and ties those documents.
+- **Rule**, agreed before the comparison: GO if, on every file, MEVM's open-set AUROC ≥ EVM's + 2 points and its closed-set accuracy ≥ EVM's − 1 point.
+
+Result (Oct 2026, %; the open-set unknowns are the classes not learned yet). HF step 1 is still to come:
+
+| Checkpoint | EVM acc / AUROC | MEVM acc / AUROC | MEVM θ = 1 acc / AUROC | Softmax acc / AUROC | mean θ |
+|---|---|---|---|---|---|
+| EAML base | 89.00 / 83.31 | 88.15 / 82.02 | 88.41 / 82.27 | 92.12 / 81.33 | 1.92 |
+| EAML step 1 | 87.66 / 80.34 | 86.47 / 80.16 | 86.85 / 80.25 | 90.63 / 80.24 | 1.73 |
+| LayoutLMv3 (pre-trained) base | 92.94 / 85.53 | 88.90 / 83.27 | 89.14 / 83.39 | 93.23 / 80.84 | 1.90 |
+
+**Decision: NO-GO.**
+- MEVM is 0.2–2.3 AUROC points below EVM on every file. It stays NO-GO even when MEVM only has to match EVM's AUROC (gain 0, accuracy loss ≤ 2 points).
+- θ = 1 performs the same as the estimated θ, so the copula's dependence modelling adds nothing.
+- MEVM is kept as an ablation, and MEVM training (plan item 12) is not run.
+- Single modalities: EAML's fused feature is clearly better than image or text alone (AUROC 83.3 vs 78.7 / 79.1). LayoutLMv3's visual-only EVM is 0.7 AUROC points above cls (86.3 vs 85.5), at 0.9 points lower accuracy.
+
 Stand-alone evaluation of a finished model: `tools/eval/eaml_eval.py`, `tools/eval/sota_llmv3_testing.py`, `tools/eval/verify_model.py`, `src/evaluation/dil_eval.py`, `tools/eval/eaml_eval_dil.py`.
 
 ## 5. What the IL scripts do
