@@ -540,6 +540,70 @@ python tools/eval/posthoc_mevm_variants.py $F/eaml/base_cil.pt --out $F/posthoc_
 - The only gain is on LayoutLMv3, where the visual tokens add 0.9 AUROC points, below the 2-point rule.
 - So modality weights recover EVM but add nothing that passes the rule. This is the ablation for the paper: equal-weight MEVM costs 0.2–2.3 AUROC points, and learned weights only bring it back to EVM's level.
 
+#### Post-hoc EVT sweep
+
+`tools/eval/posthoc_evt_sweep.py` (plan item 18) refits the EVM on the joint feature of a feature file with other settings. It runs on the full test sets: this is a sensitivity analysis, not tuning, so the IL runs keep the defaults.
+- Tail size 0.1–0.7, each with Euclidean and cosine distance.
+- `max_fit_samples` 20 / 50 / 100 / all 200 cached training documents.
+- Cover threshold 0.5–0.9 (accuracy with rejection and the rejection rate of the unknowns; the full tables are in `evt_sweep.md`).
+
+Cosine distance is the Euclidean distance between L2-normalised features; the Weibull family is closed under the power transform that relates the two.
+
+```bash
+python tools/eval/posthoc_evt_sweep.py $F/eaml/base_cil.pt --out $F/sweep/eaml_base_cil      # one file at a time, ~5 min
+```
+
+Result (Oct 2026), open-set AUROC %, default: Euclidean, tail size 0.3, 50 fit samples:
+
+| Setting | EAML base | EAML step 1 | LayoutLMv3 (pre-trained) base |
+|---|---|---|---|
+| **Default** | 83.31 | 80.34 | 85.53 |
+| Cosine distance | 85.20 | 82.82 | 85.47 |
+| Tail size 0.1–0.7 (range) | 82.8–83.3 | 79.8–80.3 | 84.3–85.9 |
+| 20 / 100 / all fit samples | 81.56 / 82.91 / 83.35 | 79.74 / 80.94 / 80.76 | 85.08 / 85.26 / 85.63 |
+
+- **Cosine distance** is the only setting that matters.
+  - On EAML it raises AUROC by 1.9 and 2.5 points and lowers FPR95 by about 9 points (base: 75.4 → 66.3), at 0.6–1.0 points lower accuracy.
+  - On LayoutLMv3 AUROC is unchanged and FPR95 improves by 3 points.
+- **Tail size** changes AUROC by less than 0.5 points on EAML. On LayoutLMv3, small tails are slightly better and 0.7 is worse (−1.3).
+- **`max_fit_samples`:** 50 is within 0.5 AUROC points of 100 or all; only 20 is too few (up to −1.8). The IL results therefore do not depend on this choice. More candidates raise the accuracy by up to 1.1 points on EAML.
+
+#### Frozen-backbone NCM baseline
+
+`tools/eval/ncm_baseline.py` (plan item 16) freezes the base model and represents every known class by the mean of its training-document features on the joint feature. A document goes to the nearest mean, and the score of that mean is the open-set score.
+
+Variants:
+- distance: cosine or Euclidean;
+- means: from 1000 training documents per class, or from 20 (the exemplar budget of the IL methods).
+
+It needs the base model's training features of **all 16 classes** (`base_all`, about 10–30 min on one GPU):
+
+```bash
+sbatch scripts/eval/run_extract_features.sh eaml base_all                          # add --partition / --gres to use a free GPU type
+sbatch --export=LLMV3_MODEL=hf scripts/eval/run_extract_features.sh llmv3 base_all
+python tools/eval/ncm_baseline.py $F/eaml/base_all_cil.pt --order $(IFS=,; echo "${CIL_ORDER[*]}") --tag eaml \
+    --out $F/ncm/eaml --run_root $RUN_ROOT
+```
+
+Outputs:
+- `ncm_baseline.md` / `.json`: steps 0–5, with NCM at step 0 too.
+- With `--run_root`: predictions files of steps 1–5, in `cil/<backbone>/ncm_<cos|euc>_<all|20>_frozen/seed42/`. `build_results.py` lists these as "NCM (…)" with strategy "frozen". There, step 0 is the shared base model (as for every method), and the NCM score is in the `ood` columns.
+
+Result (Oct 2026, %, NCM at every step, open set averaged over steps 1–4):
+
+| Backbone | Variant | Acc step 0 | Acc final | Avg inc. acc | Forgetting | Acc old / new (final) | Open AUROC |
+|---|---|---|---|---|---|---|---|
+| EAML | cosine, all | 91.27 | 77.45 | 84.69 | 1.69 | 80.61 / 30.14 | 79.14 |
+| EAML | Euclidean, all | 91.15 | 78.11 | 85.00 | 3.80 | 81.26 / 30.86 | 75.20 |
+| EAML | cosine, 20 | 91.14 | 76.62 | 84.15 | 1.80 | 79.84 / 28.42 | 79.17 |
+| LayoutLMv3 (pre-trained) | cosine, all | 93.23 | 76.12 | 85.03 | 2.19 | 80.13 / 16.01 | 78.27 |
+| LayoutLMv3 (pre-trained) | Euclidean, all | 93.20 | 76.28 | 84.91 | 3.27 | 80.29 / 16.25 | 78.40 |
+| LayoutLMv3 (pre-trained) | cosine, 20 | 93.29 | 75.98 | 85.16 | 3.20 | 80.18 / 13.09 | 77.65 |
+
+- With the frozen base features, NCM matches the base classifier at step 0 (91.3 vs 92.1 EAML, 93.2 vs 93.2 LayoutLMv3) and forgets little (2–5 points).
+- It fails on the new classes: only 13–36 % of their test documents are classified correctly after step 5. The base features do not separate the classes the model was not trained on, so the IL methods' accuracy on new classes measures how much they adapt the representation.
+- 20 documents per class are almost as good as 1000.
+
 Stand-alone evaluation of a finished model: `tools/eval/eaml_eval.py`, `tools/eval/sota_llmv3_testing.py`, `tools/eval/verify_model.py`, `src/evaluation/dil_eval.py`, `tools/eval/eaml_eval_dil.py`.
 
 ## 5. What the IL scripts do

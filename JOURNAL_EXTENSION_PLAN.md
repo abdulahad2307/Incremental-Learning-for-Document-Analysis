@@ -108,6 +108,7 @@ Work items:
 
 15. **DER++.** Store logits together with the exemplars and add the replay terms for logit matching and labels.
 16. **Frozen-backbone NCM / prototype classifier.** Freeze the base model and update only the class means. This is cheap on cached features and is a strong reference point.
+    - **Done (Oct 2026)**, `tools/eval/ncm_baseline.py`. NCM matches the base classifier at step 0 and forgets little (2–5 points), but classifies only 13–36 % of the new classes' documents correctly. Results are in `RUN_README.md`, "Frozen-backbone NCM baseline".
 17. **Method set for the journal version.**
    - Keep: fine-tuning, ER+EWC+BC, EVM, iEVM, EVM+OOD, MEVM, MEVM+OOD, DER++, NCM, joint.
    - Drop RegEVM as a configuration. Mention its negative result from the workshop paper in one sentence.
@@ -122,6 +123,7 @@ Work items:
     - `max_fit_samples` (currently 50 per class, which is a confounder)
     - distance metric (Euclidean or cosine)
     - for MEVM: fixed θ against estimated θ
+    - **Done (Oct 2026)**, `tools/eval/posthoc_evt_sweep.py`. Cosine distance raises EAML's AUROC by 1.9–2.5 points (LayoutLMv3: unchanged). Tail size and 50 vs more fit samples change it by at most 0.5 points (EAML) or 1.3 (LayoutLMv3, tail 0.7). Results are in `RUN_README.md`, "Post-hoc EVT sweep".
 19. **Small training sweep** on EAML, 1 seed, steps 1–2:
     - λ_EVM ∈ {0.01, 0.1, 1}
     - λ_OOD ∈ {0.01, 0.1, 1}
