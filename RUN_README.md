@@ -514,6 +514,32 @@ Result (Oct 2026, %; the open-set unknowns are the classes not learned yet). HF 
 - MEVM is kept as an ablation, and MEVM training (plan item 12) is not run.
 - Single modalities: EAML's fused feature is clearly better than image or text alone (AUROC 83.3 vs 78.7 / 79.1). LayoutLMv3's visual-only EVM is 0.7 AUROC points above cls (86.3 vs 85.5), at 0.9 points lower accuracy.
 
+**Second round: modality weights** (`tools/eval/posthoc_mevm_variants.py`, protocol fixed before the run). It tests two variants on the same extreme vectors:
+- **A, weighted MEVM:** ‖(w_j t_ij)‖_θ, with θ ∈ {estimated, 1, 2, 4, 8}.
+- **B, class-level fusion:** log Ψ_c = Σ_j w_j log max_i Ψ_ij, i.e. one EVM per modality with the class scores combined.
+
+How the configuration is chosen and judged:
+- The weights are searched on the simplex in steps of 0.1. Both grids contain EVM as a point (all weight on fused / cls).
+- The test documents are split 50/50 by a hash of their ID. The configuration is chosen on the selection half: the highest AUROC with accuracy ≥ EVM − 1 point.
+- The same rule as in the first round is applied once, on the report half.
+
+Run it one file at a time on the login node (about 5 min each); a run over several files was killed there.
+
+```bash
+python tools/eval/posthoc_mevm_variants.py $F/eaml/base_cil.pt --out $F/posthoc_variants/eaml_base_cil
+```
+
+| Checkpoint | Chosen configuration | EVM report acc / AUROC | Chosen report acc / AUROC | Δ AUROC | Δ acc |
+|---|---|---|---|---|---|
+| EAML base | A, fused 1.0 (= EVM) | 89.23 / 83.51 | 89.23 / 83.51 | 0.00 | 0.00 |
+| EAML step 1 | A, image 0.1 + fused 0.9, θ = 1 | 87.86 / 80.55 | 88.08 / 80.63 | +0.08 | +0.22 |
+| LayoutLMv3 (pre-trained) base | B, visual 0.5 + cls 0.5 | 93.09 / 85.56 | 92.68 / 86.45 | +0.89 | −0.41 |
+
+**Decision: NO-GO again.**
+- The weights move almost all of the mass onto the joint feature: EAML chooses EVM itself or 0.9 fused.
+- The only gain is on LayoutLMv3, where the visual tokens add 0.9 AUROC points, below the 2-point rule.
+- So modality weights recover EVM but add nothing that passes the rule. This is the ablation for the paper: equal-weight MEVM costs 0.2–2.3 AUROC points, and learned weights only bring it back to EVM's level.
+
 Stand-alone evaluation of a finished model: `tools/eval/eaml_eval.py`, `tools/eval/sota_llmv3_testing.py`, `tools/eval/verify_model.py`, `src/evaluation/dil_eval.py`, `tools/eval/eaml_eval_dil.py`.
 
 ## 5. What the IL scripts do

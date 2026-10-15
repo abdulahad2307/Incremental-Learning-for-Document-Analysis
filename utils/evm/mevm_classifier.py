@@ -92,16 +92,19 @@ class MultivariateEVM(EVMClassifier):
         shapes = torch.tensor(np.stack([ev[2] for ev in evs]), dtype=torch.float32, device=device)
         return points, scales, shapes
 
+    def log_energies(self, features, c):
+        """log t_ij(x) = kappa_ij * (log d_j(x_i, x) - log lambda_ij) of class c: (N, M extreme vectors, m) tensor."""
+        device = next(iter(features.values())).device
+        points, scales, shapes = self._class_tensors(c, device)
+        return torch.stack([shapes[:, jj] * (torch.log(torch.cdist(features[j].float(), points[jj]) + 1e-12)
+                                              - torch.log(scales[:, jj] + 1e-12))
+                            for jj, j in enumerate(self.modalities)], dim=-1)
+
     def class_nll(self, features, c, cap=True):
         """-log Psi_c(x) = min_i || t_i(x) ||_theta for every sample: (N,) tensor, differentiable in `features`.
         cap: clip at -log(1e-8) as evm_nll_loss (training); False keeps far-away samples ranked (evaluation)."""
-        device = next(iter(features.values())).device
-        points, scales, shapes = self._class_tensors(c, device)
         theta = float(self.theta[c])
-        # log t_ij = kappa_ij * (log d_j - log lambda_ij): (N, M, m)
-        log_t = torch.stack([shapes[:, jj] * (torch.log(torch.cdist(features[j].float(), points[jj]) + 1e-12)
-                                               - torch.log(scales[:, jj] + 1e-12))
-                             for jj, j in enumerate(self.modalities)], dim=-1)
+        log_t = self.log_energies(features, c)
         log_norm = torch.logsumexp(theta * log_t, dim=-1) / theta            # log || t_i ||_theta
         if cap:
             log_norm = torch.clamp(log_norm, max=math.log(_MAX_NLL))
