@@ -369,7 +369,7 @@ def main():
             feature_dict_epoch.setdefault(class_name, []).append(features_epoch[i].numpy())
         for k in feature_dict_epoch:
             feature_dict_epoch[k] = np.stack(feature_dict_epoch[k], axis=0)
-        evm_hybrid.incremental_update(feature_dict_epoch)
+        evm_hybrid.incremental_update(feature_dict_epoch, replace=True)  # same documents every epoch: replace, not add
 
         print(f"Epoch {epoch + 1}: Train Loss {train_loss:.4f}, Train Acc {train_acc:.4f}")
 

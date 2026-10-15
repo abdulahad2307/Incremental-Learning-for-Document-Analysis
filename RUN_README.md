@@ -475,7 +475,7 @@ Each file is a `torch.save`d dict; load it with `utils.eval.predictions.load_pre
   - EAML also `logits_image` and `logits_text`;
   - EVM methods `evm_prob`, OOD methods `ood_score` (higher = more in-distribution).
 
-Feature vectors are not stored; the drift analysis will save them for a fixed subsample. In the DIL EVM scripts the EVM is refitted (EVM, RegEVM) or updated (iEVM) after every epoch for L_EVM; the final open-set evaluation and `evm_prob` use its state at the epoch of the best model (until Oct 2026 they used its state after the last epoch).
+Feature vectors are not stored; the drift analysis will save them for a fixed subsample. In the DIL EVM scripts the EVM is refitted (EVM, RegEVM) or updated (iEVM) after every epoch for L_EVM. The iEVM update replaces the stored features of the training documents with the current epoch's, instead of adding them again every epoch; until Oct 2026 it added them, so its refit time grew with every epoch and the runs hit the time limit. the final open-set evaluation and `evm_prob` use its state at the epoch of the best model (until Oct 2026 they used its state after the last epoch).
 
 All validation and test sets are the full splits, for both backbones (LayoutLMv3 CIL used a random 1,250 documents per class, drawn per seed, until Oct 2026). EAML CIL now evaluates the test set once per step, with the step's best model and bias correction; before Oct 2026 it logged a `step_test` row at every validation improvement and its reported results did not include the bias correction.
 

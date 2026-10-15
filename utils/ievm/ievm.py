@@ -96,12 +96,15 @@ class IncrementalEVM:
             return np.vstack([self.class_features[lab] for lab in self.class_features if lab != label])
         return self.class_features[label]
 
-    def incremental_update(self, new_features_dict):
-        """Incrementally update (add new classes or add samples to existing) and refit efficiently."""
+    def incremental_update(self, new_features_dict, replace=False):
+        """Incrementally update (add new classes or add samples to existing) and refit efficiently.
+        replace=True: the given samples replace the stored ones of their classes instead of being added. DIL updates
+        after every epoch with the features of the same training documents; adding them would store every document
+        once per epoch, and the refit cost would grow with the epoch number."""
         new_features_dict = {label: np.array(feats).astype(np.float32) for label, feats in new_features_dict.items()}
         # Updating local database
         for label, feats in new_features_dict.items():
-            if label in self.class_features:
+            if label in self.class_features and not replace:
                 self.class_features[label] = np.vstack((self.class_features[label], feats))
             else:
                 self.class_features[label] = feats

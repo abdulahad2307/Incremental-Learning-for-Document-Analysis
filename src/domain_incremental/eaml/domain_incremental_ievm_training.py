@@ -115,7 +115,7 @@ def train_one_epoch_dil_evm(
         for k in feature_dict:
             feature_dict[k] = np.stack(feature_dict[k], axis=0)
         if evm is not None:
-            evm.incremental_update(feature_dict)
+            evm.incremental_update(feature_dict, replace=True)    # same documents every epoch: replace, not add
     if use_bias_correction and hasattr(model, "fusion_classifier"):
         with torch.no_grad():
             bias_correction = model.fusion_classifier.bias.mean().item()
