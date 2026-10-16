@@ -3,6 +3,7 @@ import random
 import torch
 import torch.nn as nn
 import numpy as np
+from torch.utils.data import ConcatDataset, DataLoader
 #from sklearn.metrics import precision_score, recall_score, f1_score
 #from utils.eaml.eaml_model import EAMLModel
 from utils.seed import add_seed_arg, set_seed
@@ -57,7 +58,8 @@ def run_domain_incremental(
     patience=10,
     use_bias_correction=True,
     resume =False,
-    resume_ckpt_path=None
+    resume_ckpt_path=None,
+    joint_training=False
 ):
     os.makedirs(checkpoint_dir, exist_ok=True)
     class_to_idx = {cls: idx for idx, cls in enumerate(global_classes)}
@@ -79,6 +81,11 @@ def run_domain_incremental(
     incremental_domain = domains[1]
 
     train_loader = dil_loader.get_domain_loaders('train').get(incremental_domain)
+    if joint_training:  # upper bound: Tobacco-3482 and the base model's RVL-CDIP training documents, shuffled together
+        rvl_train = dil_loader.get_domain_loaders('train').get(pretrained_domain)
+        train_loader = DataLoader(ConcatDataset([train_loader.dataset, rvl_train.dataset]), batch_size=batch_size,
+                                  shuffle=True, num_workers=4, collate_fn=train_loader.collate_fn)
+        print(f"Joint training on both domains (upper-bound baseline): {len(train_loader.dataset)} samples")
     val_loaders = dil_loader.get_domain_loaders('val')
     val_loader = val_loaders.get(incremental_domain)
     val_loader_pretrained = val_loaders.get(pretrained_domain)
@@ -252,11 +259,13 @@ if __name__ == "__main__":
     p.add_argument('--use_bias_correction', action='store_true')
     p.add_argument('--resume', action='store_true', help="Resume training from last checkpoint.")
     p.add_argument('--resume_ckpt_path', type=str)
+    p.add_argument('--joint_training', action='store_true',
+                   help='Train on both domains\' training data (upper-bound baseline) instead of Tobacco-3482 + replay')
 
     add_seed_arg(p)
     args = p.parse_args()
     set_seed(args.seed)
-    run_log.init("eaml", "DIL", "No EVM", args)
+    run_log.init("eaml", "DIL", run_log.baseline_method(args.joint_training, args.use_exemplars, args.use_ewc), args)
     run_domain_incremental(
         data_root=args.data_dir,
         ocr_tensor_dirs={d: t for d, t in zip(args.domains.split(','), args.ocr_tensor_dirs)},
@@ -273,6 +282,7 @@ if __name__ == "__main__":
         lambda_ewc=args.lambda_ewc,
         use_ewc=args.use_ewc,
         use_exemplars=args.use_exemplars,
+        joint_training=args.joint_training,
         max_exemplars=args.max_exemplars,
         exemplar_selection=args.exemplar_selection,
         finetune_mode=args.finetune_mode,

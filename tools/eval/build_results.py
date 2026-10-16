@@ -4,6 +4,9 @@ For every CIL run (base model = step 0, then steps 1..K) and every DIL run it co
 (utils/metrics/il_metrics.py), the open-set metrics (utils/metrics/openset_metrics.py), a bootstrap confidence interval
 of the final accuracy and an exact McNemar test against "No EVM" with the same backbone, strategy, seed and number of
 steps (utils/metrics/stats.py). Runs that differ only in the seed are aggregated as mean +- std.
+Lower and upper bounds (plan item A.6) are runs like the others ("Fine-tuning", "Joint"); in addition, the 16-class
+base model (joint training on all classes) is the upper bound after the last CIL step and is reported under each CIL
+table without any further training.
 
 Outputs in --out_dir:
   cil_runs.csv, dil_runs.csv          one row per run (seed)
@@ -23,7 +26,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from utils.metrics.il_metrics import cil_summary, dil_summary, named  # noqa: E402
+from utils.metrics.il_metrics import accuracy, cil_summary, dil_summary, named  # noqa: E402
 from utils.metrics.openset_metrics import SCORES, openset_summary, scores, auroc  # noqa: E402
 from utils.metrics.runs import base_predictions, find_runs, load_cil_run, run_label  # noqa: E402
 from utils.metrics.stats import bootstrap_ci, mcnemar, mean_std, paired  # noqa: E402
@@ -131,7 +134,18 @@ def fmt(row, col, pct=True):
     return f"{m * f:.1f} ± {s * f:.1f}" if not np.isnan(s) else f"{m * f:.1f}"
 
 
-def markdown(cil, dil):
+def cil_upper_bounds(run_root, backbones):
+    """{backbone: accuracy of the 16-class base model on the RVL-CDIP test set}: the upper bound after the last CIL
+    step (joint training on all classes), from its DIL step-0 predictions."""
+    out = {}
+    for backbone in backbones or ["eaml", "llmv3", "llmv3hf"]:
+        p = base_predictions(run_root, backbone, "DIL")
+        if p is not None:
+            out[backbone] = accuracy(*named(p["sets"]["rvl"], p["output_classes"]))
+    return out
+
+
+def markdown(cil, dil, upper=None):
     lines = ["# Results", "", "Accuracies and open-set scores in %; mean ± std over seeds (std only with >1 seed).", ""]
     if not cil.empty:
         cols = [("acc_final", "Final acc"), ("avg_inc_acc", "Avg. inc. acc"), ("forgetting", "Forgetting"),
@@ -145,10 +159,14 @@ def markdown(cil, dil):
             for _, r in g.sort_values(["strategy", "method", "steps"]).iterrows():
                 lines.append(f"| {r['method']} | {r['strategy']} | {int(r['steps'])} | {int(r['seeds'])} | "
                              + " | ".join(fmt(r, c) for c, _ in cols) + " |")
+            if upper and backbone in upper:
+                lines += ["", f"Upper bound after the last step (16-class base model, joint training on all "
+                              f"classes): {upper[backbone] * 100:.2f}"]
             lines.append("")
     if not dil.empty:
         cols = [("acc_rvl_before", "RVL before"), ("acc_rvl_after", "RVL after"), ("forgetting_rvl", "RVL forgetting"),
                 ("acc_tobacco_after", "Tobacco after"), ("acc_mean_after", "Mean after"),
+                ("acc_pooled_after", "Pooled after"),
                 ("macro_f1_rvl_after", "RVL macro-F1"), ("macro_f1_tobacco_after", "Tobacco macro-F1"),
                 ("shift_msp_auroc", "Shift AUROC (MSP)"), ("shift_ood_auroc", "Shift AUROC (OOD)")]
         for backbone, g in dil.groupby("backbone"):
@@ -181,7 +199,7 @@ def main():
     with open(os.path.join(args.out_dir, "cil_accuracy_matrices.json"), "w") as f:
         json.dump(matrices, f, indent=1)
     with open(os.path.join(args.out_dir, "results.md"), "w") as f:
-        f.write(markdown(cil_sum, dil_sum))
+        f.write(markdown(cil_sum, dil_sum, cil_upper_bounds(args.run_root, args.backbone)))
     print(f"{len(cil)} CIL runs, {len(dil)} DIL runs -> {args.out_dir}")
 
 

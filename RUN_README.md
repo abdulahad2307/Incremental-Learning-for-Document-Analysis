@@ -370,6 +370,22 @@ sbatch --array=1 scripts/class_incremental/eaml/run_classIL_evm.sh   # 3_cil_eam
 sbatch --array=1 scripts/class_incremental/eaml/run_classIL_ood.sh   # 3_cil_eaml_ood_kd: ViM OOD detector only
 ```
 
+#### 3e. Lower and upper bounds (plan item A.6)
+
+Same recipe as No EVM, standard IL, run step by step like the methods:
+- **Fine-tuning** (lower bound): only the new class's training data; no exemplars, EWC, bias correction or balanced sampling.
+- **Joint** (upper bound): all training data of all classes seen so far, every step about as expensive as a base model.
+  Step 5 is the same task as the 16-class base model, so `build_results.py` reports that model's accuracy as the upper bound after the last step, without any training. Steps 1–4 are optional.
+
+```bash
+sbatch --array=1 scripts/class_incremental/eaml/run_classIL_bound.sh finetune                  # 3_cil_eaml_finetune; then --array=2 ... 5
+sbatch --array=1 scripts/class_incremental/llmv3/run_llmv3_classIL_bound.sh finetune           # 3_cil_llmv3_finetune
+sbatch -J 3_cil_eaml_joint --array=1 scripts/class_incremental/eaml/run_classIL_bound.sh joint  # optional, steps 1-4
+sbatch -J 3_cil_llmv3_joint --array=1 scripts/class_incremental/llmv3/run_llmv3_classIL_bound.sh joint
+```
+
+Outputs: `$CIL_ROOT/<backbone>/finetune_std/` and `joint_std/`. The method is "Fine-tuning" or "Joint" in the results table and the paper tables.
+
 **Note on LayoutLMv3 with distillation:** the teacher is a frozen copy of the model, so a job needs roughly twice the GPU memory of standard IL. In the paper this did not fit on a 32 GB V100. If it runs out of memory, add a larger GPU on the command line, e.g. `sbatch -p a100 --gres=gpu:a100:1 …` (check which partitions your account can use).
 
 ### Step 4 — Domain-incremental learning RVL-CDIP → Tobacco-3482 (needs the two 16-class base models)
@@ -407,6 +423,20 @@ sbatch -J 4_dil_llmv3_evmood_kd scripts/domain_incremental/llmv3/run_llmv3_domai
 sbatch -J 4_dil_llmv3_ievm_kd scripts/domain_incremental/llmv3/run_llmv3_domainIL_ievm.sh distillation
 sbatch -J 4_dil_llmv3_regevm_kd scripts/domain_incremental/llmv3/run_llmv3_domainIL_reg_evm.sh distillation
 ```
+
+#### 4c. Lower and upper bounds (plan item A.6)
+
+- **Fine-tuning** (lower bound): Tobacco-3482 only; no replay, EWC, KD or bias correction.
+- **Joint** (upper bound): Tobacco-3482 and the base model's RVL-CDIP training documents, shuffled together, starting from the 16-class base model. An epoch covers RVL-CDIP's training set, so if a job hits the time limit, set `RESUME_CKPT` in the launcher and resubmit.
+
+```bash
+sbatch scripts/domain_incremental/eaml/run_domainIL_bound.sh finetune                     # 4_dil_eaml_finetune
+sbatch -J 4_dil_eaml_joint scripts/domain_incremental/eaml/run_domainIL_bound.sh joint
+sbatch scripts/domain_incremental/llmv3/run_llmv3_domainIL_bound.sh finetune              # 4_dil_llmv3_finetune
+sbatch -J 4_dil_llmv3_joint scripts/domain_incremental/llmv3/run_llmv3_domainIL_bound.sh joint
+```
+
+Outputs: `$DIL_ROOT/<backbone>/finetune_std/` and `joint_std/`.
 
 Extras (not in the paper's comparison):
 

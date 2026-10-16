@@ -45,6 +45,8 @@ def parse_args():
     parser.add_argument('--resume_checkpoint')
     parser.add_argument('--full_model_acc', type=float, default=None)
     parser.add_argument('--images_per_class', type=int, help="Max images per class for incremental domain")
+    parser.add_argument('--joint_training', action='store_true',
+                        help="Train on both domains' training data (upper-bound baseline) instead of Tobacco-3482 + replay")
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
     add_il_args(parser, strategy_default="standard", evm=False, persist=False)
@@ -55,7 +57,7 @@ def parse_args():
 def main():
     args = parse_args()
     set_seed(args.seed)
-    run_log.init("llmv3", "DIL", "No EVM", args)
+    run_log.init("llmv3", "DIL", run_log.baseline_method(args.joint_training, args.max_exemplars > 0, args.use_ewc), args)
     device = torch.device(args.device)
     os.makedirs(args.checkpoint_dir, exist_ok=True)
 
@@ -176,12 +178,19 @@ def main():
     # Prepare exemplars from base domain for replay
     print("Preparing exemplars from base domain for replay ...")
     base_class_indices = [label_space.index(c) for c in rvl_cdip_class]
-    exemplar_handler = ExemplarHandler(max_exemplars_per_class=args.max_exemplars, selection_method=args.exemplar_selection)
-    exemplar_handler.update_exemplars(base_train_loader.dataset, base_class_indices, model, device)
+    exemplar_samples = []                # --max_exemplars 0: no replay (fine-tuning lower bound)
+    if args.joint_training:              # upper bound: all of the base model's RVL-CDIP training documents
+        exemplar_samples = get_incremental_dataloader(
+            dataset_name=args.dataset_base, ocr_tensor_file=args.ocr_tensor_path_base, classes=rvl_cdip_class,
+            label_classes=label_space, image_dir=base_data_dir, split="train", batch_size=args.batch_size,
+            seed=args.seed).dataset
+        print(f"Joint training on both domains (upper-bound baseline): {len(exemplar_samples)} RVL-CDIP samples")
+    elif args.max_exemplars > 0:
+        exemplar_handler = ExemplarHandler(max_exemplars_per_class=args.max_exemplars, selection_method=args.exemplar_selection)
+        exemplar_handler.update_exemplars(base_train_loader.dataset, base_class_indices, model, device)
+        exemplar_samples = exemplar_handler.get_exemplar_dataset()
 
-    exemplar_samples = exemplar_handler.get_exemplar_dataset()
-
-    # Combine incremental domain dataset and base domain exemplars for training
+    # Combine incremental domain dataset and base domain exemplars (or all its training data) for training
     combined_dataset = ConcatDataset([inc_train_loader.dataset, exemplar_samples])
     combined_loader = DataLoader(combined_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
     print("Exemplar dataset prepared.")

@@ -77,6 +77,14 @@ def _jsonable(v):
     return v if isinstance(v, (int, str, bool)) or v is None else str(v)
 
 
+def baseline_method(joint_training=False, replay=True, ewc=True):
+    """Method name of the No-EVM scripts, by their flags: "Joint" (upper bound: all data seen so far),
+    "Fine-tuning" (lower bound: no replay, no EWC) or "No EVM" (ER + EWC + BC)."""
+    if joint_training:
+        return "Joint"
+    return "No EVM" if replay or ewc else "Fine-tuning"
+
+
 def init(backbone, setting, method, args=None, **fields):
     """Start a run. backbone: eaml | llmv3; setting: CIL | DIL; method: e.g. No EVM, EVM, EVM+OOD, iEVM, RegEVM.
     strategy / bias_correction are read from args (or passed as fields) so the table shows how the run was configured."""

@@ -67,6 +67,8 @@ class TestILMetrics(unittest.TestCase):
         self.assertAlmostEqual(out["acc_rvl_before"], 1.0)
         self.assertAlmostEqual(out["acc_rvl_after"], 0.75)
         self.assertAlmostEqual(out["forgetting_rvl"], 0.25)
+        self.assertAlmostEqual(out["acc_mean_after"], (0.75 + 1.0) / 2)
+        self.assertAlmostEqual(out["acc_pooled_after"], 7 / 8)        # 3/4 on rvl + 4/4 on tobacco, pooled
 
 
 class TestOpenSet(unittest.TestCase):

@@ -79,9 +79,10 @@ def _logged_final_accs(run_id):
     return accs
 
 
-def check_predictions(test, out, tag, sets, evm=False, ood=False):
+def check_predictions(test, out, tag, sets, evm=False, ood=False, method=None):
     """Check the predictions file a run saved (utils/eval/predictions.py): <out>/predictions/<tag>_seed*.pt with
-    the expected sets and fields, and accuracies that reproduce the 'final' accuracies the run logged."""
+    the expected sets and fields (and method name, if given), and accuracies that reproduce the 'final' accuracies
+    the run logged."""
     import glob
     from utils.eval.predictions import load_predictions
     files = glob.glob(os.path.join(out, "predictions", f"{tag}_seed*.pt"))
@@ -89,6 +90,8 @@ def check_predictions(test, out, tag, sets, evm=False, ood=False):
     r = load_predictions(files[0])
     test.assertEqual(sorted(r["sets"]), sorted(sets), "predictions sets")
     test.assertTrue(r["meta"].get("run_id") and r["meta"].get("git_commit") is not None, f"meta: {r['meta']}")
+    if method is not None:
+        test.assertEqual(r["meta"].get("method"), method, "method name in the predictions")
     n_out = len(r["output_classes"])
     for name, s in r["sets"].items():
         n = len(s["y_true"])
