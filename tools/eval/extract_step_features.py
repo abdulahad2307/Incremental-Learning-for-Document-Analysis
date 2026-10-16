@@ -1,8 +1,9 @@
 """Cache the per-modality features of one checkpoint for the post-hoc EVT comparison (tools/eval/posthoc_evt.py).
 
 For a CIL checkpoint (base model = step 0, or the best model of a step) it saves, with model.modality_features():
-  train        TRAIN_PER_CLASS training documents per known class, from the base models' training documents
-               (utils/data_subset.base_training_documents) - the data EVM / MEVM are fitted on
+  train        --train_per_class (default 200) training documents per known class, from the base models' training
+               documents (utils/data_subset.base_training_documents) - the data EVM / MEVM are fitted on;
+               --train_classes all: of all classes (the frozen-backbone NCM baseline needs the later classes' means)
   test_seen    all test documents of the classes the checkpoint knows (closed-set accuracy, the knowns)
   test_unseen  all test documents of the classes it has not learned yet (the unknowns of the open-set metrics)
 Each split holds {modality: float16 (N, d)}, the classifier logits, the class names and the document IDs.
@@ -27,7 +28,7 @@ from utils.data_subset import select_per_class, DEFAULT_SEED  # noqa: E402
 TRAIN_PER_CLASS = 200
 
 
-def eaml_loaders(args, known, unknown):
+def eaml_loaders(args, known, unknown, train_classes):
     from utils.class_IL.dataloader_utils import EAMLClassILDataset, common_transform, eaml_collate_fn
 
     def make(split, classes, n=None):
@@ -40,11 +41,11 @@ def eaml_loaders(args, known, unknown):
             ds.samples = [s for s in ds.samples if s[0] in keep]
         return DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=4, collate_fn=eaml_collate_fn), \
             [s[0] for s in ds.samples], list(classes)
-    return {"train": make("train", known, TRAIN_PER_CLASS), "test_seen": make("test", known),
+    return {"train": make("train", train_classes, args.train_per_class), "test_seen": make("test", known),
             "test_unseen": make("test", unknown) if unknown else None}
 
 
-def llmv3_loaders(args, known, unknown):
+def llmv3_loaders(args, known, unknown, train_classes):
     from utils.llmv3.llmv3_incremental_dataloader import get_incremental_dataloader
 
     def make(split, classes, n=None):
@@ -54,7 +55,7 @@ def llmv3_loaders(args, known, unknown):
         ds = loader.dataset
         return DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=4,
                           collate_fn=loader.collate_fn), [str(s[0]) for s in ds.samples], list(classes)
-    return {"train": make("train", known, TRAIN_PER_CLASS), "test_seen": make("test", known),
+    return {"train": make("train", train_classes, args.train_per_class), "test_seen": make("test", known),
             "test_unseen": make("test", unknown) if unknown else None}
 
 
@@ -103,13 +104,17 @@ def main():
     ap.add_argument("--ocr", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--batch_size", type=int, default=32)
+    ap.add_argument("--train_per_class", type=int, default=TRAIN_PER_CLASS)
+    ap.add_argument("--train_classes", choices=["known", "all"], default="known",
+                    help="classes of the train split: the checkpoint's classes, or all classes (NCM baseline)")
     args = ap.parse_args()
 
     known = [c.strip() for c in args.known_classes.split(",")]
     unknown = [c.strip() for c in args.all_classes.split(",") if c.strip() not in known]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = load_model(args, len(known), device)
-    loaders = (eaml_loaders if args.backbone == "eaml" else llmv3_loaders)(args, known, unknown)
+    train_classes = known + unknown if args.train_classes == "all" else known
+    loaders = (eaml_loaders if args.backbone == "eaml" else llmv3_loaders)(args, known, unknown, train_classes)
     out = {"meta": {"checkpoint": os.path.abspath(args.checkpoint), "backbone": args.backbone,
                     "llmv3_model": os.environ.get("LLMV3_MODEL", "")},
            "known_classes": known, "unknown_classes": unknown, "splits": {}}
