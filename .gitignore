@@ -21,3 +21,7 @@ __pycache__/
 
 # Local run logs (the IL results table lives under RUN_ROOT)
 results/
+
+# Markdown notes stay local (for now); only README.md is in the repository
+*.md
+!README.md
