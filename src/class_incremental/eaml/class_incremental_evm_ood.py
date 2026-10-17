@@ -37,6 +37,8 @@ from utils.il_checks import warn_inactive_terms
 from utils.paper_recipe import eaml_optimizer, EAMLStepLR
 from utils.image_transforms import set_train_augmentation
 
+VIM_FIT_PER_CLASS = 2000   # ViM fit at the end of a step: up to 2000 new-class documents + all exemplars (> 2 x 512 dims)
+
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -359,16 +361,24 @@ def run_incremental_learning_evm_ood(
             old_model.eval()
             print(f"prev: {len(previous_classes)}, new: {len(current_classes)}")
             if not resuming_this_step and not evm.initialized:
-                # No EVM / ViM was saved with the previous model (step 1 starts from the base model): fit them now, as a
-                # previous step would have, with the previous model on the previous classes' training data in this
-                # step (the exemplars), so that L_EVM and L_OOD act from the first step on
+                # No EVM / ViM was saved with the previous model (step 1 starts from the base model): fit them now with
+                # the previous model, so that L_EVM and L_OOD act from the first step on. The EVM on the previous
+                # classes' training data in this step (the exemplars); the ViM, as the base step would have fitted it,
+                # on its own training documents (ood_max_per_class per class): it needs far more samples than feature
+                # dimensions, or the residual norms of its fitting data vanish and its scale alpha explodes
                 prev_dataset = copy.copy(train_dataset)        # same dataset, only the previous classes' samples
                 prev_dataset.samples = [s for s in train_dataset.samples if s[2] in previous_classes]
                 prev_loader = DataLoader(prev_dataset, batch_size=batch_size, shuffle=False, num_workers=4,
                                          collate_fn=eaml_collate_fn)
                 evm.fit(extract_features(model, prev_loader, DEVICE))
                 if lambda_ood > 0:
-                    f_tr, z_tr, _ = collect_features_logits(model, subsample_loader(prev_loader, ood_max_per_class), DEVICE)
+                    vim_dataset = EAMLClassILDataset(data_dir=os.path.join(data_root, "train"), training_docs=True,
+                                                     current_classes=current_classes, ocr_data_path=ocr_tensor_path,
+                                                     transform=common_transform)
+                    vim_dataset.samples = [s for s in vim_dataset.samples if s[2] in previous_classes]
+                    vim_loader = DataLoader(vim_dataset, batch_size=batch_size, shuffle=False, num_workers=4,
+                                            collate_fn=eaml_collate_fn)
+                    f_tr, z_tr, _ = collect_features_logits(model, subsample_loader(vim_loader, ood_max_per_class), DEVICE)
                     W, b = last_linear_layer(model)
                     ood_vim.fit(f_tr, z_tr, W=W, b=b)
                     ood_vim.fit_keys = set(previous_classes)
@@ -525,9 +535,10 @@ def run_incremental_learning_evm_ood(
         train_feats = extract_features(model, train_loader, DEVICE)
         evm.fit(train_feats)
 
-        # ViM for L_OOD in the next step, fitted on this step's training data (new class + exemplars)
+        # ViM for L_OOD in the next step, fitted on this step's training data (new class + exemplars); up to
+        # VIM_FIT_PER_CLASS documents of the new class, so that the samples clearly outnumber the feature dimensions
         if lambda_ood > 0:
-            f_tr, z_tr, _ = collect_features_logits(model, subsample_loader(train_loader, ood_max_per_class), DEVICE)
+            f_tr, z_tr, _ = collect_features_logits(model, subsample_loader(train_loader, VIM_FIT_PER_CLASS), DEVICE)
             W, b = last_linear_layer(model)
             ood_vim.fit(f_tr, z_tr, W=W, b=b)
             ood_vim.fit_keys = set(current_classes)
