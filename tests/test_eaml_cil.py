@@ -11,10 +11,10 @@ OOD = ["--ood_method", "vim", "--ood_tpr", 0.95, "--ood_max_per_class", 8]
 # method -> (script, extra args, log lines showing the method's own part ran)
 METHODS = {
     "no_evm":      ("class_incremental.py", [], []),
-    "evm":         ("class_incremental_evm_training.py", [], []),
-    "evm_ood":     ("class_incremental_evm_ood.py", OOD + ["--lambda_evm", 0.1, "--lambda_ood", 0.1], ["Open-set step"]),
-    "ievm":        ("class_incremental_ievm_training.py", [], ["iEVM"]),
-    "regevm":      ("class_incremental_reg_evm_training.py", [], []),
+    "evm":         ("class_incremental_evm_training.py", [], ["previous classes before training"]),
+    "evm_ood":     ("class_incremental_evm_ood.py", OOD + ["--lambda_evm", 0.1, "--lambda_ood", 0.1], ["Open-set step", "previous classes before training"]),
+    "ievm":        ("class_incremental_ievm_training.py", [], ["iEVM", "previous classes before training"]),
+    "regevm":      ("class_incremental_reg_evm_training.py", [], ["previous classes before training"]),
     # not in Fig. 1, kept in the codebase
     "ood_only":    ("class_incremental_ood.py", OOD, ["Open-set step"]),
     "evm_posthoc": ("class_incremental_evm.py", [], []),

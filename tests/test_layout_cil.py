@@ -14,10 +14,10 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 OOD = ["--ood_method", "vim", "--ood_tpr", 0.95, "--ood_max_per_class", 8, "--lambda_ood", 0.1]
 METHODS = {
     "no_evm":  ("llmv3_class_incremental.py", [], []),
-    "evm":     ("llmv3_class_incremental_evm_training.py", ["--lambda_evm", 0.1], ["EVM open set test"]),
-    "evm_ood": ("llmv3_class_incremental_evm_ood.py", ["--lambda_evm", 0.1] + OOD, ["EVM open set test", "Open-set (+"]),
-    "ievm":    ("llmv3_class_incremental_ievm_training.py", ["--lambda_evm", 0.1], ["EVM open set test"]),
-    "regevm":  ("llmv3_class_incremental_reg_evm_training.py", ["--lambda_evm", 0.1], ["EVM open set test"]),
+    "evm":     ("llmv3_class_incremental_evm_training.py", ["--lambda_evm", 0.1], ["EVM open set test", "previous classes before training"]),
+    "evm_ood": ("llmv3_class_incremental_evm_ood.py", ["--lambda_evm", 0.1] + OOD, ["EVM open set test", "Open-set (+", "previous classes before training"]),
+    "ievm":    ("llmv3_class_incremental_ievm_training.py", ["--lambda_evm", 0.1], ["EVM open set test", "previous classes before training"]),
+    "regevm":  ("llmv3_class_incremental_reg_evm_training.py", ["--lambda_evm", 0.1], ["EVM open set test", "previous classes before training"]),
 }
 
 # method -> (EVM probabilities, OOD scores) expected in its saved predictions

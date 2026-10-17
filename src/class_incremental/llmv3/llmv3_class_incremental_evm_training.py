@@ -170,6 +170,13 @@ def main():
     print("Exemplar dataset prepared.")
 
     print(f"Total exemplar samples: {len(exemplar_samples)}")
+    if not evm.initialized and len(exemplar_samples) > 0:
+        # No EVM was saved with the previous model (step 1 starts from the base model): fit it now, as a
+        # previous step would have, on the previous classes' training data in this step (the exemplars); the features
+        # do not depend on the just-expanded classifier, so this is the previous model's EVM
+        prev_loader = DataLoader(exemplar_samples, batch_size=args.batch_size, shuffle=False, num_workers=4)
+        fit_evm(evm, model, prev_loader, device, label_space)
+        print(f"Fitted the EVM on {len(base_classes)} previous classes before training (no saved state).")
     print(f"Total unseen train samples: {len(unseen_train_loader.dataset)}")
     print(f"Combined training dataset samples: {len(combined_dataset)}")
 

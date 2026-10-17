@@ -174,6 +174,18 @@ def main():
     print("Exemplar dataset prepared.")
 
     print(f"Total exemplar samples: {len(exemplar_samples)}")
+    if not evm.initialized and len(exemplar_samples) > 0:
+        # No EVM / ViM was saved with the previous model (step 1 starts from the base model): fit them now, as a
+        # previous step would have, on the previous classes' training data in this step (the exemplars); the features
+        # do not depend on the just-expanded classifier, so this is the previous model's EVM (and ViM)
+        prev_loader = DataLoader(exemplar_samples, batch_size=args.batch_size, shuffle=False, num_workers=4)
+        fit_evm(evm, model, prev_loader, device, label_space)
+        n_prev = len(base_classes)                     # ViM with the previous classes' logits and head only
+        f_tr, z_tr, _ = collect_features_logits(model, prev_loader, device)
+        W, b = last_linear_layer(model)
+        ood_vim.fit(f_tr, z_tr[:, :n_prev], W=None if W is None else W[:n_prev], b=None if b is None else b[:n_prev])
+        ood_vim.fit_keys = set(base_classes)
+        print(f"Fitted the EVM and ViM on {len(base_classes)} previous classes before training (no saved state).")
     print(f"Total unseen train samples: {len(unseen_train_loader.dataset)}")
     print(f"Combined training dataset samples: {len(combined_dataset)}")
 

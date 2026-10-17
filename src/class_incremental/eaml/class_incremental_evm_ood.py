@@ -1,3 +1,4 @@
+import copy
 import os
 import torch
 import torch.nn as nn
@@ -357,6 +358,22 @@ def run_incremental_learning_evm_ood(
                 load_ckpt_into(old_model, base_model_path)
             old_model.eval()
             print(f"prev: {len(previous_classes)}, new: {len(current_classes)}")
+            if not resuming_this_step and not evm.initialized:
+                # No EVM / ViM was saved with the previous model (step 1 starts from the base model): fit them now, as a
+                # previous step would have, with the previous model on the previous classes' training data in this
+                # step (the exemplars), so that L_EVM and L_OOD act from the first step on
+                prev_dataset = copy.copy(train_dataset)        # same dataset, only the previous classes' samples
+                prev_dataset.samples = [s for s in train_dataset.samples if s[2] in previous_classes]
+                prev_loader = DataLoader(prev_dataset, batch_size=batch_size, shuffle=False, num_workers=4,
+                                         collate_fn=eaml_collate_fn)
+                evm.fit(extract_features(model, prev_loader, DEVICE))
+                if lambda_ood > 0:
+                    f_tr, z_tr, _ = collect_features_logits(model, subsample_loader(prev_loader, ood_max_per_class), DEVICE)
+                    W, b = last_linear_layer(model)
+                    ood_vim.fit(f_tr, z_tr, W=W, b=b)
+                    ood_vim.fit_keys = set(previous_classes)
+                print(f"Fitted the EVM{' and ViM' if lambda_ood > 0 else ''} on {len(previous_classes)} previous classes "
+                      f"before training (no saved state).")
             if not resuming_this_step:
                 model = inc_strategy.adapt_model(model, len(previous_classes), len(current_classes), model_name).to(DEVICE)
 

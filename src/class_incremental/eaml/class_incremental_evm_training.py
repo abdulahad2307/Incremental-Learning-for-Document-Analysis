@@ -234,6 +234,15 @@ def run_incremental_learning_evm(
                 load_ckpt_into(old_model, base_model_path)
             old_model.eval()
             print(f"prev: {len(previous_classes)}, new: {len(current_classes)}")
+            if not resuming_this_step and not evm.initialized:
+                # No EVM was saved with the previous model (step 1 starts from the base model): fit it now, as a
+                # previous step would have, on the previous model's features of the previous classes' training data in
+                # this step (the exemplars), so that L_EVM acts from the first step on
+                init_feats = {c: extract_feature_vectors(model, get_class_loader_for_class(c, train_dataset, batch_size,
+                                                                                         DEVICE, ocr_tensor_path), DEVICE)
+                              for c in previous_classes}
+                evm.fit_cuda(init_feats, device=DEVICE)
+                print(f"Fitted the EVM on {len(init_feats)} previous classes before training (no saved EVM).")
             if not resuming_this_step:
                 model = inc_strategy.adapt_model(model, len(previous_classes), len(current_classes), model_name).to(DEVICE)
 
