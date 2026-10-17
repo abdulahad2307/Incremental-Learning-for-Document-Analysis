@@ -37,6 +37,11 @@ def cil_args(data, base_model, base_classes, new_class, ckpt_dir, strategy):
     ]
 
 
+def without(args, *flags):
+    """args without the given switches (the lower bound turns off replay, EWC, bias correction, balanced sampling)."""
+    return [a for a in args if a not in flags]
+
+
 def best_checkpoint(folder):
     found = glob.glob(os.path.join(folder, "layoutlmv3_cil_incremental_*_best.pt"))
     return found[0] if found else os.path.join(folder, "<no layoutlmv3_cil_incremental_*_best.pt>")
@@ -72,6 +77,16 @@ class TestLayoutCIL(PipelineTestCase):
         run_script(self, SRC + METHODS["no_evm"][0],
                    cil_args(self.data, base, CIL_BASE, CIL_NEW, out, "standard") + ["--joint_training"],
                    cwd=out, expect_logs=["Joint training on all data"])
+        check_predictions(self, out, f"cil_{CIL_NEW}", ["seen", "unseen"], method="Joint")
+
+    def test_finetune_lower_bound(self):
+        """Lower bound (run_llmv3_classIL_bound.sh finetune): no exemplars (--max_exemplars 0), EWC or BC."""
+        out = out_dir("layout_cil", "finetune")
+        base = os.path.join(self.data, "ckpt", "llmv3_base_3.pt")
+        args = without(cil_args(self.data, base, CIL_BASE, CIL_NEW, out, "standard"),
+                       "--use_ewc", "--use_bias_correction", "--use_balanced_sampler") + ["--max_exemplars", 0]
+        run_script(self, SRC + METHODS["no_evm"][0], args, cwd=out, expect_logs=["Total exemplar samples: 0"])
+        check_predictions(self, out, f"cil_{CIL_NEW}", ["seen", "unseen"], method="Fine-tuning")
 
 
 add_matrix_tests(TestLayoutCIL, METHODS, run_method)

@@ -55,7 +55,8 @@ def parse_args():
 def main():
     args = parse_args()
     set_seed(args.seed)
-    run_log.init("llmv3", "CIL", "No EVM", args, new_class=args.unseen_classes)
+    run_log.init("llmv3", "CIL", run_log.baseline_method(args.joint_training, args.max_exemplars > 0, args.use_ewc),
+                 args, new_class=args.unseen_classes)
     device = torch.device(args.device)
     os.makedirs(args.checkpoint_dir, exist_ok=True)
 
@@ -146,9 +147,11 @@ def main():
 
     print("Preparing exemplars from base classes ...")
     base_class_indices = [label_space.index(c) for c in base_classes]
-    exemplar_handler = ExemplarHandler(max_exemplars_per_class=args.max_exemplars, selection_method=args.exemplar_selection)
-    exemplar_handler.update_exemplars(base_train_loader.dataset, base_class_indices, model, device)
-    exemplar_samples = exemplar_handler.get_exemplar_dataset()
+    exemplar_samples = []                # --max_exemplars 0: no replay (fine-tuning lower bound)
+    if args.max_exemplars > 0 and not args.joint_training:
+        exemplar_handler = ExemplarHandler(max_exemplars_per_class=args.max_exemplars, selection_method=args.exemplar_selection)
+        exemplar_handler.update_exemplars(base_train_loader.dataset, base_class_indices, model, device)
+        exemplar_samples = exemplar_handler.get_exemplar_dataset()
 
     # New class + exemplars (default), or all seen classes with --joint_training; optional balanced sampling
     combined_loader = build_cil_train_loader(args, unseen_train_loader, exemplar_samples, label_space)

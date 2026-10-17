@@ -46,6 +46,7 @@ Plan for extending the ICDAR workshop paper *"Incremental Document Image Classif
 6. **Bounds.**
    - Lower bound: fine-tuning with no exemplars, EWC or bias correction.
    - Upper bound: joint training on all classes seen so far.
+   - **Implemented (Oct 2026):** `run_classIL_bound.sh` / `run_domainIL_bound.sh` and their LayoutLMv3 counterparts (`finetune` | `joint`), labelled "Fine-tuning" / "Joint". The 16-class base model is the CIL upper bound after the last step (`build_results.py`). See `RUN_README.md` 3e and 4c.
 7. **Statistics.**
    - Report mean ± std over seeds.
    - Give bootstrap 95 % confidence intervals on the test sets.

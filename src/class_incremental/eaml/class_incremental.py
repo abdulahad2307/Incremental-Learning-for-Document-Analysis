@@ -443,7 +443,7 @@ if __name__ == "__main__":
     add_seed_arg(p)
     args = p.parse_args()
     set_seed(args.seed)
-    run_log.init("eaml", "CIL", "No EVM", args)
+    run_log.init("eaml", "CIL", run_log.baseline_method(args.joint_training, args.use_exemplars, args.use_ewc), args)
 
     run_incremental_learning(
         data_root=args.data_dir,

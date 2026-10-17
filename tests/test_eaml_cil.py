@@ -36,6 +36,11 @@ def cil_args(data, base_model, base_classes, new_class, ckpt_dir, strategy):
     ]
 
 
+def without(args, *flags):
+    """args without the given switches (the lower bound turns off replay, EWC, bias correction, balanced sampling)."""
+    return [a for a in args if a not in flags]
+
+
 def run_method(test, method, strategy):
     script, extra, logs = METHODS[method]
     out = out_dir("eaml_cil", f"{method}_{strategy}")
@@ -66,6 +71,17 @@ class TestEAMLCIL(PipelineTestCase):
         run_script(self, SRC + METHODS["no_evm"][0],
                    cil_args(self.data, base, CIL_BASE, CIL_NEW, out, "standard") + ["--joint_training"],
                    cwd=out, expect_logs=["Joint training on all data"])
+        check_predictions(self, out, f"cil_{CIL_NEW}", ["seen", "unseen"], method="Joint")
+
+    def test_finetune_lower_bound(self):
+        """Lower bound (scripts/class_incremental/eaml/run_classIL_bound.sh finetune): no exemplars, EWC or BC."""
+        out = out_dir("eaml_cil", "finetune")
+        base = os.path.join(self.data, "ckpt", "eaml_base_3.pt")
+        args = without(cil_args(self.data, base, CIL_BASE, CIL_NEW, out, "standard"),
+                       "--use_ewc", "--use_exemplars", "--use_bias_correction", "--use_balanced_sampler")
+        run_script(self, SRC + METHODS["no_evm"][0], args, cwd=out,
+                   expect_files=[os.path.join(out, f"best_model_{CIL_NEW}.pth")], expect_logs=["and 0 exemplars"])
+        check_predictions(self, out, f"cil_{CIL_NEW}", ["seen", "unseen"], method="Fine-tuning")
 
 
 add_matrix_tests(TestEAMLCIL, METHODS, run_method)

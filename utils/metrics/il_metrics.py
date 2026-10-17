@@ -104,13 +104,18 @@ def cil_summary(steps):
 
 
 def dil_summary(base, adapted, first="rvl", second="tobacco"):
-    """DIL metrics: the base model (before) and the adapted model (after) on both domains."""
+    """DIL metrics: the base model (before) and the adapted model (after) on both domains. acc_mean_after weights
+    both domains equally (as the DIL model selection on the two validation sets does); acc_pooled_* is the accuracy
+    over all test documents of both domains together, which RVL-CDIP's much larger test set dominates."""
     out = {}
     for tag, r in (("before", base), ("after", adapted)):
+        both = []
         for d in (first, second):
             true, pred = named(r["sets"][d], r["output_classes"])
             out[f"acc_{d}_{tag}"] = accuracy(true, pred)
             out[f"macro_f1_{d}_{tag}"] = macro_f1(true, pred)
+            both.append(true == pred)
+        out[f"acc_pooled_{tag}"] = float(np.mean(np.concatenate(both)))
     out[f"forgetting_{first}"] = out[f"acc_{first}_before"] - out[f"acc_{first}_after"]
     out[f"gain_{second}"] = out[f"acc_{second}_after"] - out[f"acc_{second}_before"]
     out["acc_mean_after"] = (out[f"acc_{first}_after"] + out[f"acc_{second}_after"]) / 2
