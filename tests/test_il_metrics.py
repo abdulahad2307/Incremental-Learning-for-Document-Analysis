@@ -69,6 +69,11 @@ class TestILMetrics(unittest.TestCase):
         self.assertAlmostEqual(out["forgetting_rvl"], 0.25)
         self.assertAlmostEqual(out["acc_mean_after"], (0.75 + 1.0) / 2)
         self.assertAlmostEqual(out["acc_pooled_after"], 7 / 8)        # 3/4 on rvl + 4/4 on tobacco, pooled
+        self.assertNotIn("acc_tobacco_after_clean", out)
+        docs = list(adapted["sets"]["tobacco"]["doc_id"])
+        clean = dil_summary(base, adapted, exclude={docs[0]})
+        self.assertAlmostEqual(clean["acc_tobacco_after_clean"], 1.0)
+        self.assertEqual(clean["n_tobacco_excluded"], 1)
 
 
 class TestOpenSet(unittest.TestCase):

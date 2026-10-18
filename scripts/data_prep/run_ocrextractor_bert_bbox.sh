@@ -15,6 +15,7 @@
 # Submit from the repo root (paths: scripts/config.sh):
 #   sbatch.tinyfat scripts/data_prep/run_ocrextractor_bert_bbox.sh                    # RVL-CDIP: 8 shards -> $LLMV3_OCR_RVL
 #   sbatch.tinyfat --array=0 scripts/data_prep/run_ocrextractor_bert_bbox.sh tobacco  # Tobacco-3482 -> $LLMV3_OCR_TOB
+#   sbatch.tinyfat --array=0 scripts/data_prep/run_ocrextractor_bert_bbox.sh rvl_n    # RVL-CDIP-N   -> $LLMV3_OCR_RVLN
 
 unset SLURM_EXPORT_ENV
 module load python/3.12-conda
@@ -25,6 +26,9 @@ SHARD=${SLURM_ARRAY_TASK_ID:-0}
 if [ "${1:-rvl}" = "tobacco" ]; then
     DATA_DIR=$DATA_ROOT/$TOB_DOMAIN
     OUTPUT_DIR=$LLMV3_OCR_TOB
+elif [ "$1" = "rvl_n" ]; then                # RVL-CDIP-N, the second DIL domain
+    DATA_DIR=$DATA_ROOT/$RVLN_DOMAIN
+    OUTPUT_DIR=$LLMV3_OCR_RVLN
 else
     DATA_DIR=$RVL_DIR
     OUTPUT_DIR=$LLMV3_OCR_RVL

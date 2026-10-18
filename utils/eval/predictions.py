@@ -34,6 +34,14 @@ from utils import run_log
 
 FORMAT_VERSION = 1
 
+# Name of the incremental domain's test set in DIL predictions files, by its folder (scripts/config.sh) or dataset name
+DIL_SETS = {"Tobacco3482-jpg": "tobacco", "tobacco3482": "tobacco", "RVL-CDIP-N": "rvl_n", "rvl_cdip_n": "rvl_n"}
+
+
+def dil_set_name(domain):
+    """'tobacco' or 'rvl_n': the predictions set of a DIL run's incremental domain (folder or dataset name)."""
+    return DIL_SETS[os.path.basename(str(domain).rstrip("/"))]
+
 
 class _Indexed(Dataset):
     """Returns (index, sample) so that the dataset index of every document that survives the collate is known."""

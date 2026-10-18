@@ -15,7 +15,7 @@ from utils.domain_IL.dil_utils import (
 )
 from utils.domain_IL.dil_model_loader import load_eaml_model_partial, set_finetune_mode
 from utils import run_log
-from utils.eval.predictions import save_predictions
+from utils.eval.predictions import save_predictions, dil_set_name
 from utils.evm.evm_classifier import EVMClassifier
 from utils.ievm.ievm import IncrementalEVM
 from utils.evm.evm_loss import evm_nll_loss
@@ -326,7 +326,7 @@ def run_domain_incremental_with_evm_training(
 
     # Per-document predictions after the domain step (best model), on the test sets of both domains
     save_predictions(model, DEVICE, checkpoint_dir, "dil", global_classes,
-                     {"rvl": (test_loader_pretrained, global_classes), "tobacco": (test_loader_incremental, global_classes)},
+                     {"rvl": (test_loader_pretrained, global_classes), dil_set_name(incremental_domain): (test_loader_incremental, global_classes)},
                      evm=final_evm, ood_detector=None, checkpoint=best_model_path)
 
 

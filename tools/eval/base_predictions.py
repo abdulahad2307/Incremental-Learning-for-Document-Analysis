@@ -5,7 +5,8 @@ the first step, which the accuracy matrix (forgetting, BWT) needs. It is shared 
 
   CIL (11-class base model): "seen" = test documents of the base classes, "unseen" = those of the classes added later
   DIL (16-class base model): "rvl" = RVL-CDIP test, "tobacco" = Tobacco-3482 test (built as the DIL scripts build it;
-                             its Note / Report documents are kept but cannot be predicted by the base model)
+                             its Note / Report documents are kept but cannot be predicted by the base model), and
+                             "rvl_n" = RVL-CDIP-N test if its OCR is given as a third --ocr
 
 The test loaders are the ones the incremental scripts use, so the documents match their predictions files.
 Output: <dir of the checkpoint>/predictions/base_<cil|dil>_seed<seed>.pt (or --out_dir).
@@ -14,7 +15,8 @@ Examples (scripts/eval/run_base_predictions.sh runs all four of a backbone):
   python tools/eval/base_predictions.py --backbone eaml --setting CIL --checkpoint $EAML_BASE_11 \
       --base_classes $CIL_BASE_CLASSES --all_classes $ALL_CLASSES --data_root $DATA_ROOT --ocr $EAML_OCR_RVL
   python tools/eval/base_predictions.py --backbone llmv3 --setting DIL --checkpoint $LLMV3_BASE_16 \
-      --all_classes $DIL_CLASSES --base_classes $ALL_CLASSES --data_root $DATA_ROOT --ocr $LLMV3_OCR_RVL $LLMV3_OCR_TOB
+      --all_classes $DIL_CLASSES --base_classes $ALL_CLASSES --data_root $DATA_ROOT --ocr $LLMV3_OCR_RVL $LLMV3_OCR_TOB \
+      $LLMV3_OCR_RVLN
 """
 import argparse
 import os
@@ -27,7 +29,7 @@ from utils.eval.predictions import save_predictions  # noqa: E402
 from utils.run_log import _git_commit  # noqa: E402
 from utils.seed import set_seed  # noqa: E402
 
-RVL_DOMAIN, TOB_DOMAIN = "all_prepdataset", "Tobacco3482-jpg"   # folder names under --data_root (scripts/config.sh)
+RVL_DOMAIN, TOB_DOMAIN, RVLN_DOMAIN = "all_prepdataset", "Tobacco3482-jpg", "RVL-CDIP-N"   # under --data_root
 
 
 def eaml_loaders(args, base_classes, all_classes):
@@ -40,12 +42,13 @@ def eaml_loaders(args, base_classes, all_classes):
                 "unseen": (get_class_il_loader("eaml", test_dir, future, args.batch_size, ocr_data=args.ocr[0]),
                            future)}
     from utils.domain_IL.dil_dataloader import DILDataLoader
-    loader = DILDataLoader(data_root=args.data_root, domain_list=[RVL_DOMAIN, TOB_DOMAIN],
+    domains = [RVL_DOMAIN, TOB_DOMAIN, RVLN_DOMAIN][:len(args.ocr)]
+    loader = DILDataLoader(data_root=args.data_root, domain_list=domains,
                            batch_size=args.batch_size, img_size=(229, 229), num_workers=4,
-                           ocr_tensor_dirs={RVL_DOMAIN: args.ocr[0], TOB_DOMAIN: args.ocr[1]},
+                           ocr_tensor_dirs=dict(zip(domains, args.ocr)),
                            class_to_idx={c: i for i, c in enumerate(all_classes)})
     test = loader.get_domain_loaders("test")
-    return {"rvl": (test.get(RVL_DOMAIN), all_classes), "tobacco": (test.get(TOB_DOMAIN), all_classes)}
+    return {name: (test.get(d), all_classes) for name, d in zip(["rvl", "tobacco", "rvl_n"], domains)}
 
 
 def llmv3_loaders(args, base_classes, all_classes):
@@ -60,8 +63,11 @@ def llmv3_loaders(args, base_classes, all_classes):
         future = [c for c in all_classes if c not in base_classes]
         return {"seen": (make("rvl_cdip", args.ocr[0], RVL_DOMAIN, base_classes, base_classes), base_classes),
                 "unseen": (make("rvl_cdip", args.ocr[0], RVL_DOMAIN, future, future), future)}
-    return {"rvl": (make("rvl_cdip", args.ocr[0], RVL_DOMAIN, all_classes, all_classes), all_classes),
+    sets = {"rvl": (make("rvl_cdip", args.ocr[0], RVL_DOMAIN, all_classes, all_classes), all_classes),
             "tobacco": (make("tobacco3482", args.ocr[1], TOB_DOMAIN, all_classes, all_classes), all_classes)}
+    if len(args.ocr) > 2:
+        sets["rvl_n"] = (make("rvl_cdip_n", args.ocr[2], RVLN_DOMAIN, all_classes, all_classes), all_classes)
+    return sets
 
 
 def load_model(args, num_outputs, device):
@@ -90,8 +96,8 @@ def main():
     ap.add_argument("--batch_size", type=int, default=32)
     ap.add_argument("--seed", type=int, default=42, help="seed recorded in the file name (the test splits are fixed)")
     args = ap.parse_args()
-    if args.setting == "DIL" and len(args.ocr) != 2:
-        ap.error("DIL needs --ocr <RVL-CDIP OCR> <Tobacco-3482 OCR>")
+    if args.setting == "DIL" and len(args.ocr) not in (2, 3):
+        ap.error("DIL needs --ocr <RVL-CDIP OCR> <Tobacco-3482 OCR> [<RVL-CDIP-N OCR>]")
 
     set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

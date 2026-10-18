@@ -26,11 +26,11 @@ SAVES = {"no_evm": (False, False), "evm": (True, False), "evm_ood": (True, True)
          "regevm": (True, False), "ood_only": (False, True), "evm_posthoc": (True, False)}
 
 
-def dil_args(data, out, strategy):
+def dil_args(data, out, strategy, inc=("bert_ocr_tobacco", "tobacco3482")):
     return [
         "--data_dir", data, "--ocr_tensor_path_base", os.path.join(data, "bert_ocr_rvl"),
-        "--ocr_tensor_path_inc", os.path.join(data, "bert_ocr_tobacco"), "--all_classes", ",".join(GLOBAL_CLASSES),
-        "--dataset_base", "rvl_cdip", "--dataset_inc", "tobacco3482",
+        "--ocr_tensor_path_inc", os.path.join(data, inc[0]), "--all_classes", ",".join(GLOBAL_CLASSES),
+        "--dataset_base", "rvl_cdip", "--dataset_inc", inc[1],
         "--base_model_path", os.path.join(data, "ckpt", "llmv3_base_16.pt"), "--checkpoint_dir", out,
         "--batch_size", 2, "--lr", 1e-4, "--num_epochs", 1, "--patience", 1, "--images_per_class", 3,
         "--strategy", strategy, "--use_ewc", "--max_exemplars", 2, "--exemplar_selection", "random",
@@ -54,6 +54,14 @@ class TestLayoutDIL(PipelineTestCase):
         run_script(self, SRC + METHODS["no_evm"][0], args, cwd=out, expect_logs=logs)
         self.assertTrue(glob.glob(os.path.join(out, "layoutlmv3_domain_incremental*_best.pt")), f"no best checkpoint in {out}")
         check_predictions(self, out, "dil", ["rvl", "tobacco"], method=method)
+
+    def test_rvl_n_domain(self):
+        """RVL-CDIP-N as the incremental domain (DIL_DOMAIN=rvl_n): its test set is saved as "rvl_n"."""
+        out = out_dir("layout_dil", "rvl_n")
+        run_script(self, SRC + METHODS["no_evm"][0],
+                   dil_args(self.data, out, "standard", inc=("bert_ocr_rvln", "rvl_cdip_n")), cwd=out)
+        self.assertTrue(glob.glob(os.path.join(out, "layoutlmv3_domain_incremental*_best.pt")), f"no best checkpoint in {out}")
+        check_predictions(self, out, "dil", ["rvl", "rvl_n"], method="No EVM")
 
     def test_finetune_lower_bound(self):
         self.run_bound("finetune", ["--max_exemplars", 0], ["Total exemplar samples: 0"], "Fine-tuning")

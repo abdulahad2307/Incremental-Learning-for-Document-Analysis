@@ -30,12 +30,15 @@ source "${SLURM_SUBMIT_DIR:-$PWD}/scripts/config.sh" || exit 1
 
 BACKBONE=${1:?usage: sbatch scripts/eval/run_base_predictions.sh eaml|llmv3}
 case "$BACKBONE" in
-    eaml)  CKPT_11=$EAML_BASE_11;  CKPT_16=$EAML_BASE_16;  OCR_RVL=$EAML_OCR_RVL;  OCR_TOB=$EAML_OCR_TOB ;;
-    llmv3) CKPT_11=$LLMV3_BASE_11; CKPT_16=$LLMV3_BASE_16; OCR_RVL=$LLMV3_OCR_RVL; OCR_TOB=$LLMV3_OCR_TOB ;;
+    eaml)  CKPT_11=$EAML_BASE_11;  CKPT_16=$EAML_BASE_16;  OCR_RVL=$EAML_OCR_RVL;  OCR_TOB=$EAML_OCR_TOB
+           OCR_RVLN=$EAML_OCR_RVLN ;;
+    llmv3) CKPT_11=$LLMV3_BASE_11; CKPT_16=$LLMV3_BASE_16; OCR_RVL=$LLMV3_OCR_RVL; OCR_TOB=$LLMV3_OCR_TOB
+           OCR_RVLN=$LLMV3_OCR_RVLN ;;
     *) echo "ERROR: backbone must be eaml or llmv3" >&2; exit 1 ;;
 esac
 require_file "$CKPT_11" "train the 11-class base model first"
 require_file "$CKPT_16" "train the 16-class base model first"
+OCR_RVLN_ARG=(); [ -e "$OCR_RVLN" ] && OCR_RVLN_ARG=("$OCR_RVLN")   # RVL-CDIP-N as a third DIL test set once its OCR exists
 
 python tools/eval/base_predictions.py --backbone "$BACKBONE" --setting CIL --checkpoint "$CKPT_11" \
   --base_classes "$CIL_BASE_CLASSES" --all_classes "$ALL_CLASSES" \
@@ -43,6 +46,6 @@ python tools/eval/base_predictions.py --backbone "$BACKBONE" --setting CIL --che
 
 python tools/eval/base_predictions.py --backbone "$BACKBONE" --setting DIL --checkpoint "$CKPT_16" \
   --base_classes "$ALL_CLASSES" --all_classes "$DIL_CLASSES" \
-  --data_root "$DATA_ROOT" --ocr "$OCR_RVL" "$OCR_TOB" --seed "$SEED" || exit 1
+  --data_root "$DATA_ROOT" --ocr "$OCR_RVL" "$OCR_TOB" "${OCR_RVLN_ARG[@]}" --seed "$SEED" || exit 1
 
 echo "Finished: $(dirname "$CKPT_11")/predictions/ and $(dirname "$CKPT_16")/predictions/"

@@ -4,8 +4,9 @@ Builds (once per directory) a tiny dataset with the real class names and the dir
 
     <root>/all_prepdataset/{train,val,test}/<16 RVL-CDIP classes>/*.jpg     (CIL + DIL base domain)
     <root>/Tobacco3482-jpg/<10 Tobacco classes>/*.jpg                       (DIL incremental domain)
+    <root>/RVL-CDIP-N/<12 RVL-CDIP-N classes>/*.jpg                         (second DIL incremental domain)
     <root>/eaml_ocr.pt            EAML OCR: {image path: {input_ids, attention_mask}}  (bert-base-uncased ids)
-    <root>/bert_ocr_rvl/, bert_ocr_tobacco/   LayoutLMv3 OCR: one <stem>.pt per image (ids + boxes)
+    <root>/bert_ocr_rvl/, bert_ocr_tobacco/, bert_ocr_rvln/   LayoutLMv3 OCR: one <stem>.pt per image (ids + boxes)
     <root>/class_mapping.json
     <root>/ckpt/{eaml,llmv3}_base_{3,16}.pt   randomly initialised base checkpoints ({"model_state_dict": ...})
 
@@ -24,6 +25,8 @@ RVL_CLASSES = ['letter', 'form', 'email', 'handwritten', 'advertisement', 'scien
 TOBACCO_CLASSES = ['letter', 'form', 'email', 'advertisement', 'scientific_report', 'news_article', 'resume', 'memo',
                    'Note', 'Report']
 GLOBAL_CLASSES = RVL_CLASSES + ['Note', 'Report']
+RVLN_CLASSES = ['budget', 'email', 'form', 'handwritten', 'invoice', 'letter', 'memo', 'news_article', 'questionnaire',
+                'resume', 'scientific_publication', 'specification']
 
 # Class-incremental setting used by the tests: 3 base classes, 1 new class, 1 later class (unknown in open-set eval)
 CIL_BASE = ['letter', 'form', 'email']
@@ -52,7 +55,7 @@ def _bert_ids(rng, length, n_real, cls_idx):
 
 def build_fixture(root):
     """Create the synthetic dataset and checkpoints under `root` (skipped if already complete)."""
-    marker = os.path.join(root, ".complete")
+    marker = os.path.join(root, ".complete_rvln")          # renamed when the fixture gains data (RVL-CDIP-N)
     if os.path.exists(marker):
         return root
     os.makedirs(root, exist_ok=True)
@@ -86,6 +89,13 @@ def build_fixture(root):
         os.makedirs(d, exist_ok=True)
         for i in range(TOBACCO_PER_CLASS):
             add(os.path.join(d, f"tob_{cls}_{i}.jpg"), GLOBAL_CLASSES.index(cls), tob_bert)
+    rvln_bert = os.path.join(root, "bert_ocr_rvln")
+    os.makedirs(rvln_bert, exist_ok=True)
+    for cls in RVLN_CLASSES:
+        d = os.path.join(root, "RVL-CDIP-N", cls)
+        os.makedirs(d, exist_ok=True)
+        for i in range(TOBACCO_PER_CLASS):
+            add(os.path.join(d, f"rvln_{cls}_{i}.jpg"), GLOBAL_CLASSES.index(cls), rvln_bert)
     torch.save(eaml_ocr, os.path.join(root, "eaml_ocr.pt"))
     with open(os.path.join(root, "class_mapping.json"), "w") as f:
         json.dump({str(i): c for i, c in enumerate(RVL_CLASSES)}, f, indent=1)

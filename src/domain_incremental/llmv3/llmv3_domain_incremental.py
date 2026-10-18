@@ -9,7 +9,7 @@ from utils.seed import add_seed_arg, set_seed
 from utils.llmv3.llmv3_model_loader import load_llmv3_checkpoint
 from utils.llmv3.llmv3_il_common import add_il_args, make_teacher, distill_term, center_classifier_bias, gil as gil_ratio
 from utils import run_log
-from utils.eval.predictions import save_predictions
+from utils.eval.predictions import save_predictions, dil_set_name
 from utils.il_checks import warn_inactive_terms
 from utils.training_scope import set_training_scope
 from utils.llmv3.llmv3_incremental_dataloader import get_incremental_dataloader
@@ -21,6 +21,8 @@ import torch.optim as optim
 from tqdm import tqdm
 from utils.paper_recipe import llmv3_optimizer, FixedLR
 
+INC_DIRS = {"tobacco3482": "Tobacco3482-jpg", "rvl_cdip_n": "RVL-CDIP-N"}   # incremental domain folders under --data_dir
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="LayoutLMv3 Domain-Incremental Training")
@@ -29,7 +31,7 @@ def parse_args():
     parser.add_argument('--ocr_tensor_path_inc', required=True)
     parser.add_argument('--all_classes', required=True)
     parser.add_argument('--dataset_base', default='rvl_cdip', choices=['rvl_cdip', 'tobacco3482'])
-    parser.add_argument('--dataset_inc', default='tobacco3482', choices=['rvl_cdip', 'tobacco3482'])
+    parser.add_argument('--dataset_inc', default='tobacco3482', choices=['tobacco3482', 'rvl_cdip_n'])
     parser.add_argument('--base_model_path', required=True)
     parser.add_argument('--checkpoint_dir', default='checkpoints')
     parser.add_argument('--batch_size', type=int, default=8)
@@ -103,7 +105,7 @@ def main():
 
 
     print(f"Loading incremental domain ({args.dataset_inc}) train data .....")
-    inc_data_dir = os.path.join(args.data_dir, 'Tobacco3482-jpg')
+    inc_data_dir = os.path.join(args.data_dir, INC_DIRS[args.dataset_inc])
     inc_train_loader = get_incremental_dataloader(
         dataset_name=args.dataset_inc,
         ocr_tensor_file=args.ocr_tensor_path_inc,
@@ -348,7 +350,7 @@ def main():
 
     # Per-document predictions after the domain step (best model), on the test sets of both domains
     save_predictions(model, device, args.checkpoint_dir, "dil", all_classes,
-                     {"rvl": (base_test_loader, all_classes), "tobacco": (inc_test_loader, all_classes)},
+                     {"rvl": (base_test_loader, all_classes), dil_set_name(args.dataset_inc): (inc_test_loader, all_classes)},
                      evm=None, ood_detector=None, checkpoint=best_path)
 
 

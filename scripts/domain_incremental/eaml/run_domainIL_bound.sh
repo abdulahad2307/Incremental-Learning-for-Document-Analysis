@@ -31,17 +31,17 @@ case "$BOUND" in
     joint)    BOUND_ARGS=(--joint_training) ;;
     *) echo "ERROR: bound must be finetune or joint" >&2; exit 1 ;;
 esac
-CKPT_DIR=$DIL_ROOT/eaml/${BOUND}_std/seed$SEED
+CKPT_DIR=$DIL_ROOT/eaml/${BOUND}_std${DIL_SUFFIX}/seed$SEED
 require_file "$EAML_BASE_16" "train the base model first"
-require_file "$DATA_ROOT/$TOB_DOMAIN"
+require_file "$DATA_ROOT/$INC_DOMAIN"
 RESUME_CKPT=""                           # resume: a checkpoint in $CKPT_DIR
 mkdir -p "$CKPT_DIR"
 
 python src/domain_incremental/eaml/domain_incremental.py \
   --seed "$SEED" \
   --data_dir "$DATA_ROOT" \
-  --ocr_tensor_dirs "$EAML_OCR_RVL" "$EAML_OCR_TOB" \
-  --domains "$RVL_DOMAIN,$TOB_DOMAIN" \
+  --ocr_tensor_dirs "$EAML_OCR_RVL" "$EAML_OCR_INC" \
+  --domains "$RVL_DOMAIN,$INC_DOMAIN" \
   --global_classes "$DIL_CLASSES" \
   --eaml_ckpt_path "$EAML_BASE_16" \
   --checkpoint_dir "$CKPT_DIR" \

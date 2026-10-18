@@ -31,7 +31,7 @@ case "$BOUND" in
     joint)    BOUND_ARGS=(--joint_training) ;;
     *) echo "ERROR: bound must be finetune or joint" >&2; exit 1 ;;
 esac
-CKPT_DIR=$DIL_ROOT/$LLMV3_TAG/${BOUND}_std/seed$SEED
+CKPT_DIR=$DIL_ROOT/$LLMV3_TAG/${BOUND}_std${DIL_SUFFIX}/seed$SEED
 require_file "$LLMV3_BASE_16" "train the base model first"
 RESUME_CKPT=""                           # resume: a checkpoint in $CKPT_DIR
 mkdir -p "$CKPT_DIR"
@@ -40,10 +40,10 @@ python src/domain_incremental/llmv3/llmv3_domain_incremental.py \
   --seed "$SEED" \
   --data_dir "$DATA_ROOT" \
   --ocr_tensor_path_base "$LLMV3_OCR_RVL" \
-  --ocr_tensor_path_inc "$LLMV3_OCR_TOB" \
+  --ocr_tensor_path_inc "$LLMV3_OCR_INC" \
   --all_classes "$DIL_CLASSES" \
   --dataset_base rvl_cdip \
-  --dataset_inc tobacco3482 \
+  --dataset_inc "$LLMV3_DATASET_INC" \
   --base_model_path "$LLMV3_BASE_16" \
   --checkpoint_dir "$CKPT_DIR" \
   --batch_size 64 \
