@@ -1,3 +1,4 @@
+import copy
 import os
 import torch
 import torch.nn as nn
@@ -22,8 +23,25 @@ from utils.eval.predictions import save_predictions
 from utils.il_checks import warn_inactive_terms
 from utils.paper_recipe import eaml_optimizer, EAMLStepLR
 from utils.image_transforms import set_train_augmentation
+from utils.class_IL.derpp import DerppMemory, memory_path, compute_logits, train_epoch as derpp_train_epoch
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def eaml_forward(model):
+    """Fusion logits of an EAML batch (DER++)."""
+    return lambda b: model(images=b["images"].to(DEVICE), texts={k: v.to(DEVICE) for k, v in b["texts"].items()})
+
+
+def eaml_collate(dataset):
+    """Batch of EAML dataset samples (path, tokens, class), loaded with `dataset`'s current transform (DER++)."""
+    from utils.class_IL.dataloader_utils import eaml_collate_fn
+
+    def collate(samples):
+        ds = copy.copy(dataset)
+        ds.samples = list(samples)
+        return eaml_collate_fn([ds[i] for i in range(len(samples))])
+    return collate
 
 
 def get_unseen_classes(base_classes: List[str], all_classes: List[str]) -> List[str]:
@@ -59,7 +77,10 @@ def run_incremental_learning(
     full_model_acc: Optional[float] = None,
     patience: int = 10,
     use_balanced_sampler: bool = False,
-    use_bias_correction: bool = False
+    use_bias_correction: bool = False,
+    derpp: bool = False,
+    derpp_alpha: float = 0.1,
+    derpp_beta: float = 0.5
 ):
     import shutil
     from torch.utils.data import WeightedRandomSampler, DataLoader
@@ -158,8 +179,11 @@ def run_incremental_learning(
                                          len(previous_classes), DEVICE)
                     replay_samples = [s for c in previous_classes for s in exemplar_mgr.exemplars.get(c, [])]
                 train_dataset.samples = replay_samples + new_data_samples
-                print(f"Training on {len(new_data_samples)} new-class samples and {len(replay_samples)} exemplars "
-                      f"of {len(previous_classes)} previous classes.")
+                if derpp:   # DER++: the current data is the new class only; the memory is replayed by its own terms
+                    train_dataset.samples = new_data_samples
+                print(f"Training on {len(new_data_samples)} new-class samples and "
+                      f"{0 if derpp else len(replay_samples)} exemplars of {len(previous_classes)} previous classes"
+                      f"{' (DER++: the exemplars are replayed from its memory)' if derpp else ''}.")
             else:
                 print(f"Joint training on all data of {len(current_classes)} classes (upper-bound baseline).")
 
@@ -234,6 +258,21 @@ def run_incremental_learning(
             if not resuming_this_step:
                 model = inc_strategy.adapt_model(model, len(previous_classes), len(current_classes), model_name).to(DEVICE)
 
+        if derpp:
+            # DER++ memory: saved with the previous step's best model; step 1 builds it from the base model, with the
+            # exemplars it selected for the base classes and its logits
+            mem_file = memory_path(base_model_path)
+            if os.path.exists(mem_file):
+                memory = DerppMemory.load(mem_file)
+                print(f"Loaded the DER++ memory ({len(memory)} exemplars) from {mem_file}")
+            else:
+                memory = DerppMemory()
+                memory.add(replay_samples, [current_classes.index(s[2]) for s in replay_samples],
+                           compute_logits(eaml_forward(old_model), replay_samples, eaml_collate(train_dataset),
+                                          batch_size, old_model))
+                print(f"Built the DER++ memory from the previous model: {len(memory)} exemplars")
+            replay = memory.batches(batch_size, eaml_collate(train_dataset))
+
         tm = get_training_mode(model, training_mode, trainable_layers)
         model = tm.prepare_for_training()
         warn_inactive_terms(model, use_ewc=use_ewc)
@@ -255,17 +294,24 @@ def run_incremental_learning(
             print(f"\n= Epoch {epoch+1}/{num_epochs} for Class {new_class} =")
             train_metrics = CILMetrics(current_classes)
             set_train_augmentation(train_loader, True)  # EAML paper augmentation, training only
-            train_result = train_one_epoch_cil_v2(
-                model,
-                train_loader,
-                optimizer,
-                criterion,
-                DEVICE,
-                train_metrics,
-                inc_strategy=inc_strategy,
-                old_model=old_model,
-                ewc=ewc if use_ewc else None
-            )
+            if derpp:
+                loss_avg, acc = derpp_train_epoch(
+                    model, train_loader, optimizer,
+                    lambda b: inc_strategy.compute_loss(model, b, criterion, old_model=None, ewc=None),
+                    eaml_forward(model), replay, DEVICE, derpp_alpha, derpp_beta)
+                train_result = {"loss": loss_avg, "top1_acc": acc}
+            else:
+                train_result = train_one_epoch_cil_v2(
+                    model,
+                    train_loader,
+                    optimizer,
+                    criterion,
+                    DEVICE,
+                    train_metrics,
+                    inc_strategy=inc_strategy,
+                    old_model=old_model,
+                    ewc=ewc if use_ewc else None
+                )
             set_train_augmentation(train_loader, False)
             val_metrics = CILMetrics(current_classes)
             val_result = evaluate(model, val_loader, DEVICE, val_metrics, None)
@@ -328,6 +374,13 @@ def run_incremental_learning(
             exemplar_mgr.update(train_loader.dataset, new_class, model)
             for cls in exemplar_mgr.exemplars:
                 print(f"Exemplar samples for {cls}: {len(exemplar_mgr.exemplars[cls])}")
+        if derpp and this_step_best_path:
+            # the new class's exemplars join the memory with the logits of this step's best model
+            new_ex = exemplar_mgr.exemplars.get(new_class, [])
+            memory.add(new_ex, [current_classes.index(s[2]) for s in new_ex],
+                       compute_logits(eaml_forward(model), new_ex, eaml_collate(train_dataset), batch_size, model))
+            memory.save(memory_path(this_step_best_path))
+            print(f"Saved the DER++ memory ({len(memory)} exemplars) -> {memory_path(this_step_best_path)}")
 
         # ---------- BIAS CORRECTION ----------
         if use_bias_correction:
@@ -440,10 +493,17 @@ if __name__ == "__main__":
     p.add_argument('--full_model_acc', type=float, default=None)
     #p.add_argument('--test_interval', type=int, default=20)
     p.add_argument('--patience', type=int, default=10)
+    p.add_argument('--derpp', action='store_true', help='DER++ (Buzzega et al., 2020): replay exemplars with their '
+                   'stored logits; the training data is the new class only (needs --use_exemplars)')
+    p.add_argument('--derpp_alpha', type=float, default=0.1, help='DER++ weight of the logit matching')
+    p.add_argument('--derpp_beta', type=float, default=0.5, help='DER++ weight of the replay cross-entropy')
     add_seed_arg(p)
     args = p.parse_args()
+    if args.derpp and not args.use_exemplars:
+        p.error("--derpp needs --use_exemplars")
     set_seed(args.seed)
-    run_log.init("eaml", "CIL", run_log.baseline_method(args.joint_training, args.use_exemplars, args.use_ewc), args)
+    run_log.init("eaml", "CIL", "DER++" if args.derpp else
+                 run_log.baseline_method(args.joint_training, args.use_exemplars, args.use_ewc), args)
 
     run_incremental_learning(
         data_root=args.data_dir,
@@ -474,5 +534,8 @@ if __name__ == "__main__":
         resume_checkpoint=args.resume_checkpoint,
         global_best_acc=args.global_best_acc,
         full_model_acc=args.full_model_acc,
-        patience=args.patience
+        patience=args.patience,
+        derpp=args.derpp,
+        derpp_alpha=args.derpp_alpha,
+        derpp_beta=args.derpp_beta
     )
