@@ -21,17 +21,17 @@ module load python/3.12-conda
 conda activate mtil
 source "${SLURM_SUBMIT_DIR:-$PWD}/scripts/config.sh" || exit 1
 
-CKPT_DIR=$DIL_ROOT/eaml/regevm_std/seed$SEED
+CKPT_DIR=$DIL_ROOT/eaml/regevm_std${DIL_SUFFIX}/seed$SEED
 require_file "$EAML_BASE_16" "train the base model first"
-require_file "$DATA_ROOT/$TOB_DOMAIN"
+require_file "$DATA_ROOT/$INC_DOMAIN"
 RESUME_CKPT=""                           # resume: a checkpoint in $CKPT_DIR
 mkdir -p "$CKPT_DIR"
 
 python src/domain_incremental/eaml/domain_incremental_reg_evm_training.py \
   --seed "$SEED" \
   --data_dir "$DATA_ROOT" \
-  --ocr_tensor_dirs "$EAML_OCR_RVL" "$EAML_OCR_TOB" \
-  --domains "$RVL_DOMAIN,$TOB_DOMAIN" \
+  --ocr_tensor_dirs "$EAML_OCR_RVL" "$EAML_OCR_INC" \
+  --domains "$RVL_DOMAIN,$INC_DOMAIN" \
   --global_classes "$DIL_CLASSES" \
   --eaml_ckpt_path "$EAML_BASE_16" \
   --checkpoint_dir "$CKPT_DIR" \

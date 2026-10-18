@@ -103,10 +103,12 @@ def cil_summary(steps):
     return out, A, tasks
 
 
-def dil_summary(base, adapted, first="rvl", second="tobacco"):
+def dil_summary(base, adapted, first="rvl", second="tobacco", exclude=None):
     """DIL metrics: the base model (before) and the adapted model (after) on both domains. acc_mean_after weights
     both domains equally (as the DIL model selection on the two validation sets does); acc_pooled_* is the accuracy
-    over all test documents of both domains together, which RVL-CDIP's much larger test set dominates."""
+    over all test documents of both domains together, which RVL-CDIP's much larger test set dominates.
+    exclude: doc ids of the second domain's test documents that also occur in the first domain (near-duplicates,
+    tools/data/overlap_check.py); adds acc_<second>_<before|after>_clean without them."""
     out = {}
     for tag, r in (("before", base), ("after", adapted)):
         both = []
@@ -115,6 +117,10 @@ def dil_summary(base, adapted, first="rvl", second="tobacco"):
             out[f"acc_{d}_{tag}"] = accuracy(true, pred)
             out[f"macro_f1_{d}_{tag}"] = macro_f1(true, pred)
             both.append(true == pred)
+            if d == second and exclude:
+                keep = ~np.isin(np.asarray(r["sets"][d]["doc_id"], dtype=object), list(exclude))
+                out[f"acc_{d}_{tag}_clean"] = accuracy(true, pred, keep)
+                out[f"n_{d}_excluded"] = int((~keep).sum())
         out[f"acc_pooled_{tag}"] = float(np.mean(np.concatenate(both)))
     out[f"forgetting_{first}"] = out[f"acc_{first}_before"] - out[f"acc_{first}_after"]
     out[f"gain_{second}"] = out[f"acc_{second}_after"] - out[f"acc_{second}_before"]

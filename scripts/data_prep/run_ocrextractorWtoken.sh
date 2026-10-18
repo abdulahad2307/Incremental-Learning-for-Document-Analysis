@@ -18,6 +18,7 @@
 #   sbatch.tinyfat scripts/data_prep/run_ocrextractorWtoken.sh                    # RVL-CDIP: tasks 0-31
 #   sbatch.tinyfat --array=16-31 scripts/data_prep/run_ocrextractorWtoken.sh      # only some tasks (e.g. reruns)
 #   sbatch.tinyfat --array=0 scripts/data_prep/run_ocrextractorWtoken.sh tobacco  # Tobacco-3482 -> $EAML_OCR_TOB
+#   sbatch.tinyfat --array=0 scripts/data_prep/run_ocrextractorWtoken.sh rvl_n    # RVL-CDIP-N   -> $EAML_OCR_RVLN
 # Afterwards merge the RVL-CDIP parts: sbatch.tinyfat scripts/data_prep/run_combinetensors.sh
 
 unset SLURM_EXPORT_ENV
@@ -26,9 +27,9 @@ conda activate ocr_env
 source "${SLURM_SUBMIT_DIR:-$PWD}/scripts/config.sh" || exit 1
 
 TASK=${SLURM_ARRAY_TASK_ID:-0}
-if [ "${1:-rvl}" = "tobacco" ]; then
-    DATA_DIR=$DATA_ROOT/$TOB_DOMAIN
-    OUTPUT_PT=$EAML_OCR_TOB
+if [ "${1:-rvl}" = "tobacco" ] || [ "${1:-rvl}" = "rvl_n" ]; then
+    if [ "$1" = "tobacco" ]; then DATA_DIR=$DATA_ROOT/$TOB_DOMAIN; OUTPUT_PT=$EAML_OCR_TOB
+    else DATA_DIR=$DATA_ROOT/$RVLN_DOMAIN; OUTPUT_PT=$EAML_OCR_RVLN; fi
     OFFSET=0; MAX_IMAGES=""
 else
     DATA_DIR=$RVL_DIR

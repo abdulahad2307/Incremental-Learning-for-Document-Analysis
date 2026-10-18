@@ -6,7 +6,9 @@ of the final accuracy and an exact McNemar test against "No EVM" with the same b
 steps (utils/metrics/stats.py). Runs that differ only in the seed are aggregated as mean +- std.
 Lower and upper bounds (plan item A.6) are runs like the others ("Fine-tuning", "Joint"); in addition, the 16-class
 base model (joint training on all classes) is the upper bound after the last CIL step and is reported under each CIL
-table without any further training.
+table without any further training. If tools/data/overlap_check.py has been run, the DIL tables also report the
+Tobacco-3482 accuracy without its test documents that have a near-duplicate in RVL-CDIP ("no overlap"). DIL runs are
+reported per incremental domain (Tobacco-3482, RVL-CDIP-N; "New" = that domain in the tables).
 
 Outputs in --out_dir:
   cil_runs.csv, dil_runs.csv          one row per run (seed)
@@ -33,6 +35,7 @@ from utils.metrics.stats import bootstrap_ci, mcnemar, mean_std, paired  # noqa:
 from utils.eval.predictions import load_predictions  # noqa: E402
 
 REFERENCE = "No EVM"
+DIL_DOMAINS = {"tobacco": "Tobacco-3482", "rvl_n": "RVL-CDIP-N"}   # incremental domains (predictions set names)
 KEYS = ["backbone", "method", "strategy"]
 
 
@@ -87,8 +90,20 @@ def cil_rows(run_root, backbones):
     return rows, matrices
 
 
+def overlapping_documents(run_root):
+    """Tobacco-3482 doc ids ('<class>/<file>') with a confirmed near-duplicate in RVL-CDIP
+    (<run_root>/overlap/overlap_pairs.csv of tools/data/overlap_check.py), or None if the check has not been run."""
+    path = os.path.join(run_root, "overlap", "overlap_pairs.csv")
+    if not os.path.exists(path):
+        return None
+    pairs = pd.read_csv(path)
+    pairs = pairs[pairs.confirmed & pairs.comparison.str.startswith("Tobacco")]
+    return set(pairs["query"])
+
+
 def dil_rows(run_root, backbones):
     rows, correct, bases = [], {}, {}
+    overlap = overlapping_documents(run_root)
     for (backbone, method_dir, seed), files in sorted(find_runs(run_root, "DIL").items()):
         if backbones and backbone not in backbones:
             continue
@@ -99,15 +114,24 @@ def dil_rows(run_root, backbones):
             continue
         adapted = load_predictions(files[0])
         method, strategy = run_label(adapted)
-        row = {"backbone": backbone, "method": method, "strategy": strategy, "seed": seed, "run": method_dir,
-               **dil_summary(bases[backbone], adapted)}
-        for kind in SCORES:          # domain-shift detection: RVL-CDIP = known, Tobacco-3482 = unknown
-            k, u = scores(adapted["sets"]["rvl"], kind), scores(adapted["sets"]["tobacco"], kind)
+        domain = next(d for d in adapted["sets"] if d != "rvl")      # the incremental domain: tobacco | rvl_n
+        if domain not in bases[backbone]["sets"]:
+            print(f"[skip] {backbone}/{method_dir}/seed{seed}: the step-0 predictions have no '{domain}' set "
+                  "(rerun scripts/eval/run_base_predictions.sh once its OCR exists)")
+            continue
+        summary = dil_summary(bases[backbone], adapted, second=domain,
+                              exclude=overlap if domain == "tobacco" else None)
+        # domain-independent names for the tables: <metric>_new_<...> = the incremental domain
+        summary.update({k.replace(f"_{domain}", "_new", 1): v for k, v in list(summary.items()) if f"_{domain}" in k})
+        row = {"backbone": backbone, "domain": domain, "method": method, "strategy": strategy, "seed": seed,
+               "run": method_dir, **summary}
+        for kind in SCORES:          # domain-shift detection: RVL-CDIP = known, the incremental domain = unknown
+            k, u = scores(adapted["sets"]["rvl"], kind), scores(adapted["sets"][domain], kind)
             if k is not None and u is not None:
                 row[f"shift_{kind}_auroc"] = auroc(k, u)
         rows.append(row)
-        correct[id(row)] = {d: correctness(adapted, d) for d in ("rvl", "tobacco")}
-    add_mcnemar(rows, correct, ["backbone", "strategy"], ["rvl", "tobacco"])
+        correct[id(row)] = {"rvl": correctness(adapted, "rvl"), "new": correctness(adapted, domain)}
+    add_mcnemar(rows, correct, ["backbone", "domain", "strategy"], ["rvl", "new"])
     return rows
 
 
@@ -165,12 +189,12 @@ def markdown(cil, dil, upper=None):
             lines.append("")
     if not dil.empty:
         cols = [("acc_rvl_before", "RVL before"), ("acc_rvl_after", "RVL after"), ("forgetting_rvl", "RVL forgetting"),
-                ("acc_tobacco_after", "Tobacco after"), ("acc_mean_after", "Mean after"),
-                ("acc_pooled_after", "Pooled after"),
-                ("macro_f1_rvl_after", "RVL macro-F1"), ("macro_f1_tobacco_after", "Tobacco macro-F1"),
+                ("acc_new_before", "New before"), ("acc_new_after", "New after"), ("acc_mean_after", "Mean after"),
+                ("acc_pooled_after", "Pooled after"), ("acc_new_after_clean", "New after, no overlap"),
+                ("macro_f1_rvl_after", "RVL macro-F1"), ("macro_f1_new_after", "New macro-F1"),
                 ("shift_msp_auroc", "Shift AUROC (MSP)"), ("shift_ood_auroc", "Shift AUROC (OOD)")]
-        for backbone, g in dil.groupby("backbone"):
-            lines += [f"## DIL (RVL-CDIP → Tobacco-3482): {backbone}", "",
+        for (backbone, domain), g in dil.groupby(["backbone", "domain"]):
+            lines += [f"## DIL (RVL-CDIP → {DIL_DOMAINS.get(domain, domain)}): {backbone}", "",
                       "| Method | Strategy | Seeds | " + " | ".join(n for _, n in cols) + " |",
                       "|" + "---|" * (3 + len(cols))]
             for _, r in g.sort_values(["strategy", "method"]).iterrows():
@@ -191,7 +215,7 @@ def main():
     cil, matrices = cil_rows(args.run_root, args.backbone)
     dil = dil_rows(args.run_root, args.backbone)
     cil_sum = summarise(cil, KEYS + ["steps"])
-    dil_sum = summarise(dil, KEYS)
+    dil_sum = summarise(dil, KEYS + ["domain"])
     pd.DataFrame(cil).to_csv(os.path.join(args.out_dir, "cil_runs.csv"), index=False)
     pd.DataFrame(dil).to_csv(os.path.join(args.out_dir, "dil_runs.csv"), index=False)
     cil_sum.to_csv(os.path.join(args.out_dir, "cil_summary.csv"), index=False)

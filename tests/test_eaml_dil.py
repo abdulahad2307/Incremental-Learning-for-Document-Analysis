@@ -25,10 +25,10 @@ SAVES = {"no_evm": (False, False), "evm": (True, False), "evm_ood": (True, True)
          "regevm": (True, False), "ood_only": (False, True), "evm_posthoc": (True, False)}
 
 
-def dil_args(data, out, strategy):
+def dil_args(data, out, strategy, domain="Tobacco3482-jpg"):
     ocr = os.path.join(data, "eaml_ocr.pt")
     return [
-        "--data_dir", data, "--domains", "all_prepdataset,Tobacco3482-jpg", "--ocr_tensor_dirs", ocr, ocr,
+        "--data_dir", data, "--domains", f"all_prepdataset,{domain}", "--ocr_tensor_dirs", ocr, ocr,
         "--global_classes", ",".join(GLOBAL_CLASSES), "--eaml_ckpt_path", os.path.join(data, "ckpt", "eaml_base_16.pt"),
         "--checkpoint_dir", out, "--batch_size", 2, "--lr", 1e-4, "--num_epochs", 1, "--patience", 1,
         "--strategy", strategy, "--use_ewc", "--use_exemplars", "--max_exemplars", 64, "--exemplar_selection", "random",
@@ -51,6 +51,13 @@ class TestEAMLDIL(PipelineTestCase):
         run_script(self, SRC + METHODS["no_evm"][0], args(out), cwd=out,
                    expect_files=[os.path.join(out, "best_model.pth")], expect_logs=logs)
         check_predictions(self, out, "dil", ["rvl", "tobacco"], method=method)
+
+    def test_rvl_n_domain(self):
+        """RVL-CDIP-N as the incremental domain (DIL_DOMAIN=rvl_n): its test set is saved as "rvl_n"."""
+        out = out_dir("eaml_dil", "rvl_n")
+        run_script(self, SRC + METHODS["no_evm"][0], dil_args(self.data, out, "standard", domain="RVL-CDIP-N"),
+                   cwd=out, expect_files=[os.path.join(out, "best_model.pth")], expect_logs=["Replay memory"])
+        check_predictions(self, out, "dil", ["rvl", "rvl_n"], method="No EVM")
 
     def test_finetune_lower_bound(self):
         self.run_bound("finetune", lambda out: without(dil_args(self.data, out, "standard"),

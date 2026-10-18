@@ -23,6 +23,8 @@ export HF_HUB_DISABLE_XET=1
 DATA_ROOT=/home/woody/iwi5/iwi5280h/dataset
 RVL_DOMAIN=all_prepdataset                  # RVL-CDIP as <split>/<class>/ folders under DATA_ROOT
 TOB_DOMAIN=Tobacco3482-jpg                  # Tobacco-3482 as <class>/ folders under DATA_ROOT
+RVLN_DOMAIN=RVL-CDIP-N                      # RVL-CDIP-N (Larson et al., 2022; 12 RVL-CDIP classes, outside IIT-CDIP):
+                                            # the second ("far") DIL domain, as <class>/ folders under DATA_ROOT
 RVL_DIR=$DATA_ROOT/$RVL_DOMAIN
 
 # OCR (step 1), all Tesseract. EAML: text tokens per image in one .pt dict (merged from shards);
@@ -32,11 +34,14 @@ OCR_ROOT=$DATA_ROOT/ocr
 EAML_OCR_SHARDS=$OCR_ROOT/eaml_rvl_shards   # part_<offset>.pt written by run_ocrextractorWtoken.sh, merged by run_combinetensors.sh
 EAML_OCR_RVL=$OCR_ROOT/eaml_rvl_tesseract.pt
 EAML_OCR_TOB=$OCR_ROOT/eaml_tobacco_tesseract.pt
+EAML_OCR_RVLN=$OCR_ROOT/eaml_rvln_tesseract.pt
 LLMV3_OCR_RVL=$OCR_ROOT/llmv3_rvl_bert_tesseract
 LLMV3_OCR_TOB=$OCR_ROOT/llmv3_tobacco_bert_tesseract
+LLMV3_OCR_RVLN=$OCR_ROOT/llmv3_rvln_bert_tesseract
 # Pre-trained LayoutLMv3 (LLMV3_MODEL=hf): LayoutLMv3 tokens + boxes (+ OCR words), one .pt per image
 LLMV3HF_OCR_RVL=$OCR_ROOT/llmv3hf_rvl_tesseract
 LLMV3HF_OCR_TOB=$OCR_ROOT/llmv3hf_tobacco_tesseract
+LLMV3HF_OCR_RVLN=$OCR_ROOT/llmv3hf_rvln_tesseract
 OCR_SHARD_SIZE=50000                        # LayoutLMv3 OCR: images per array task; RVL-CDIP (399,829) = tasks 0-7
 EAML_OCR_PART_SIZE=12500                    # EAML OCR: images per array task (~6-7 h); RVL-CDIP = tasks 0-31
 RVL_NUM_IMAGES=399829                       # images in $RVL_DIR; the merged EAML OCR file must have this many entries
@@ -79,6 +84,7 @@ case "$LLMV3_MODEL" in
         LLMV3_TAG=llmv3hf
         LLMV3_OCR_RVL=$LLMV3HF_OCR_RVL
         LLMV3_OCR_TOB=$LLMV3HF_OCR_TOB
+        LLMV3_OCR_RVLN=$LLMV3HF_OCR_RVLN
         LLMV3_BASE_11=$BASE_ROOT/llmv3hf_11cls/layoutlmv3_rvl_cdip_best.pt
         LLMV3_BASE_16=$BASE_ROOT/llmv3hf_16cls/layoutlmv3_rvl_cdip_best.pt
         # until filled in, steps 3-4 stop with "invalid float value: 'set_LLMV3HF_BASE_.._ACC_in_config.sh'"
@@ -93,6 +99,18 @@ ALL_CLASSES="letter,form,email,handwritten,advertisement,scientific_report,scien
 CIL_BASE_CLASSES="letter,form,email,handwritten,advertisement,scientific_report,invoice,presentation,questionnaire,resume,memo"
 CIL_ORDER=(scientific_publication specification file_folder news_article budget)   # class added in step 1, 2, ...
 DIL_CLASSES="$ALL_CLASSES,Note,Report"      # RVL-CDIP classes + the two Tobacco-only classes
+
+# Incremental (second) domain of the DIL runs: DIL_DOMAIN=tobacco (default, Tobacco-3482) or rvl_n (RVL-CDIP-N, outside
+# the IIT-CDIP archive). Choose it when submitting: sbatch --export=DIL_DOMAIN=rvl_n <DIL script> ... (with LLMV3_MODEL:
+# --export=DIL_DOMAIN=rvl_n,LLMV3_MODEL=hf). RVL-CDIP-N runs go to <method>_<std|kd>_rvln/ under $DIL_ROOT/<backbone>.
+export DIL_DOMAIN=${DIL_DOMAIN:-tobacco}
+case "$DIL_DOMAIN" in
+    tobacco) INC_DOMAIN=$TOB_DOMAIN;  EAML_OCR_INC=$EAML_OCR_TOB;  LLMV3_OCR_INC=$LLMV3_OCR_TOB
+             LLMV3_DATASET_INC=tobacco3482; DIL_SUFFIX="" ;;
+    rvl_n)   INC_DOMAIN=$RVLN_DOMAIN; EAML_OCR_INC=$EAML_OCR_RVLN; LLMV3_OCR_INC=$LLMV3_OCR_RVLN
+             LLMV3_DATASET_INC=rvl_cdip_n;  DIL_SUFFIX=_rvln ;;
+    *) echo "ERROR: DIL_DOMAIN must be tobacco or rvl_n, got '$DIL_DOMAIN'" >&2; exit 1 ;;
+esac
 
 # ---------------- Helpers ----------------
 require_file() {

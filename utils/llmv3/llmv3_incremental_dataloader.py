@@ -54,7 +54,7 @@ class IncrementalOCRTensorsDataset(Dataset):
             # Dataset folder structure per dataset
             if dataset_name == "rvl_cdip":
                 class_dir = self.image_dir / split / class_name
-            elif dataset_name == "tobacco3482":
+            elif dataset_name in ("tobacco3482", "rvl_cdip_n"):     # no split folders: <class>/ under image_dir
                 class_dir = self.image_dir / class_name
             else:
                 raise ValueError(f"Unknown dataset_name {dataset_name}")

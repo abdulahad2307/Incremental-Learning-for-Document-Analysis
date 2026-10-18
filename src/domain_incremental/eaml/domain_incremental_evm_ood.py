@@ -15,7 +15,7 @@ from utils.domain_IL.dil_utils import (
 )
 from utils.domain_IL.dil_model_loader import load_eaml_model_partial, set_finetune_mode
 from utils import run_log
-from utils.eval.predictions import save_predictions
+from utils.eval.predictions import save_predictions, dil_set_name
 
 from utils.evm.evm_classifier import EVMClassifier
 from utils.evm.evm_eval import evm_openset_metrics
@@ -359,7 +359,7 @@ def run_domain_incremental_evm_ood(
 
     # Per-document predictions after the domain step (best model), on the test sets of both domains
     save_predictions(model, DEVICE, checkpoint_dir, "dil", global_classes,
-                     {"rvl": (test_loader_pretrained, global_classes), "tobacco": (test_loader_incremental, global_classes)},
+                     {"rvl": (test_loader_pretrained, global_classes), dil_set_name(incremental_domain): (test_loader_incremental, global_classes)},
                      evm=evm, ood_detector=ood_detector, checkpoint=best_model_path)
 
 
