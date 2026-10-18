@@ -4,8 +4,10 @@ For a CIL checkpoint (base model = step 0, or the best model of a step) it saves
   train        --train_per_class (default 200) training documents per known class, from the base models' training
                documents (utils/data_subset.base_training_documents) - the data EVM / MEVM are fitted on;
                --train_classes all: of all classes (the frozen-backbone NCM baseline needs the later classes' means)
-  test_seen    all test documents of the classes the checkpoint knows (closed-set accuracy, the knowns)
-  test_unseen  all test documents of the classes it has not learned yet (the unknowns of the open-set metrics)
+  test_seen    the test documents of the classes the checkpoint knows (closed-set accuracy, the knowns)
+  test_unseen  the test documents of the classes it has not learned yet (the unknowns of the open-set metrics)
+               all of them, or --test_per_class of each class, chosen reproducibly (the same documents for every
+               checkpoint: the drift analysis compares the steps of a run on them)
 Each split holds {modality: float16 (N, d)}, the classifier logits, the class names and the document IDs.
 Modalities: EAML image / text / fused, LayoutLMv3 (Custom or pre-trained) text / visual / cls.
 
@@ -34,15 +36,16 @@ def eaml_loaders(args, known, unknown, train_classes):
     def make(split, classes, n=None):
         ds = EAMLClassILDataset(os.path.join(args.data_dir, split), classes, ocr_data_path=args.ocr,
                                 transform=common_transform, training_docs=(split == "train"))
-        if n is not None:   # n of each class's base training documents, chosen reproducibly
+        if n is not None:   # n documents of each class (of its base training documents for train), reproducibly
             keep = set()
             for c in classes:
                 keep.update(select_per_class([p for p, _, k in ds.samples if k == c], n, DEFAULT_SEED, c))
             ds.samples = [s for s in ds.samples if s[0] in keep]
         return DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=4, collate_fn=eaml_collate_fn), \
             [s[0] for s in ds.samples], list(classes)
-    return {"train": make("train", train_classes, args.train_per_class), "test_seen": make("test", known),
-            "test_unseen": make("test", unknown) if unknown else None}
+    return {"train": make("train", train_classes, args.train_per_class),
+            "test_seen": make("test", known, args.test_per_class),
+            "test_unseen": make("test", unknown, args.test_per_class) if unknown else None}
 
 
 def llmv3_loaders(args, known, unknown, train_classes):
@@ -55,8 +58,9 @@ def llmv3_loaders(args, known, unknown, train_classes):
         ds = loader.dataset
         return DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=4,
                           collate_fn=loader.collate_fn), [str(s[0]) for s in ds.samples], list(classes)
-    return {"train": make("train", train_classes, args.train_per_class), "test_seen": make("test", known),
-            "test_unseen": make("test", unknown) if unknown else None}
+    return {"train": make("train", train_classes, args.train_per_class),
+            "test_seen": make("test", known, args.test_per_class),
+            "test_unseen": make("test", unknown, args.test_per_class) if unknown else None}
 
 
 def load_model(args, n_classes, device):
@@ -105,6 +109,7 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--batch_size", type=int, default=32)
     ap.add_argument("--train_per_class", type=int, default=TRAIN_PER_CLASS)
+    ap.add_argument("--test_per_class", type=int, default=None, help="test documents per class (default: all)")
     ap.add_argument("--train_classes", choices=["known", "all"], default="known",
                     help="classes of the train split: the checkpoint's classes, or all classes (NCM baseline)")
     args = ap.parse_args()
