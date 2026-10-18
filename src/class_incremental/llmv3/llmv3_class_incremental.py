@@ -5,6 +5,7 @@ import torch
 import torch.nn.functional as F
 import gc
 from torch.utils.data import DataLoader, ConcatDataset
+from torch.utils.data.dataloader import default_collate
 from utils.seed import add_seed_arg, set_seed
 from utils.llmv3.llmv3_model_loader import load_llmv3_checkpoint
 from utils.llmv3.llmv3_il_common import build_cil_train_loader, add_il_args, make_teacher, distill_term, center_classifier_bias, gil as gil_ratio
@@ -18,6 +19,7 @@ from utils.llmv3.llmv3_incremental_utils import (
     ExemplarHandler, expand_classifier, evaluate
 )
 import torch.optim as optim
+from utils.class_IL.derpp import DerppMemory, memory_path, compute_logits, derpp_replay_loss
 from tqdm import tqdm
 from utils.paper_recipe import llmv3_optimizer, FixedLR
 
@@ -48,14 +50,25 @@ def parse_args():
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
     parser.add_argument('--test_classes', default=None, help="Comma separated test classes if different")
     add_il_args(parser, strategy_default="standard", evm=False, persist=False, cil=True)
+    parser.add_argument('--derpp', action='store_true', help='DER++ (Buzzega et al., 2020): replay exemplars with '
+                        'their stored logits; the training data is the new class only')
+    parser.add_argument('--derpp_alpha', type=float, default=0.1, help='DER++ weight of the logit matching')
+    parser.add_argument('--derpp_beta', type=float, default=0.5, help='DER++ weight of the replay cross-entropy')
     add_seed_arg(parser)
     return parser.parse_args()
+
+
+def llmv3_forward(model, device):
+    """Logits of a LayoutLMv3 batch (DER++)."""
+    keys = ("input_ids", "bbox", "attention_mask", "pixel_values")
+    return lambda b: model(**{k: b[k].to(device) for k in keys})
 
 
 def main():
     args = parse_args()
     set_seed(args.seed)
-    run_log.init("llmv3", "CIL", run_log.baseline_method(args.joint_training, args.max_exemplars > 0, args.use_ewc),
+    run_log.init("llmv3", "CIL", "DER++" if args.derpp else
+                 run_log.baseline_method(args.joint_training, args.max_exemplars > 0, args.use_ewc),
                  args, new_class=args.unseen_classes)
     device = torch.device(args.device)
     os.makedirs(args.checkpoint_dir, exist_ok=True)
@@ -168,6 +181,25 @@ def main():
         print(f"  Class {all_classes[cls]} (index {cls}): {count} exemplars")
     """
     print(f"Total exemplar samples: {len(exemplar_samples)}")
+    if args.derpp:
+        # DER++ memory: saved with the previous step's best model; step 1 builds it from the base model (its
+        # exemplars and its logits: the classifier was only just expanded, so its old outputs are the base model's)
+        derpp_fwd = llmv3_forward(model, device)
+        mem_file = memory_path(args.base_model_path)
+        if os.path.exists(mem_file):
+            memory = DerppMemory.load(mem_file)
+            print(f"Loaded the DER++ memory ({len(memory)} exemplars) from {mem_file}")
+        else:
+            memory = DerppMemory()
+            memory.add(exemplar_samples, [int(x['labels']) for x in exemplar_samples],
+                       compute_logits(derpp_fwd, exemplar_samples, default_collate, args.batch_size,
+                                      model)[:, :base_num_classes])
+            print(f"Built the DER++ memory from the previous model: {len(memory)} exemplars")
+        replay = memory.batches(args.batch_size, default_collate, seed=args.seed)
+        # the current data is the new class only; the memory is replayed by the DER++ terms
+        combined_loader = DataLoader(unseen_train_loader.dataset, batch_size=args.batch_size, shuffle=True,
+                                     num_workers=4)
+        print(f"DER++: training on {len(unseen_train_loader.dataset)} new-class samples, replaying {len(memory)}")
     print(f"Total unseen train samples: {len(unseen_train_loader.dataset)}")
     print(f"Combined training dataset samples: {len(combined_dataset)}")
     
@@ -241,6 +273,8 @@ def main():
                 loss = loss + args.lambda_distill * distill_term(new_logits_raw, old_logits, args.temperature)
             if ewc:
                 loss += ewc.penalty(model)
+            if args.derpp:
+                loss = loss + derpp_replay_loss(derpp_fwd, replay, device, args.derpp_alpha, args.derpp_beta)
 
 
             # Backpropagate (fp32, as the base model)
@@ -308,6 +342,15 @@ def main():
     best_path = os.path.join(args.checkpoint_dir, f"layoutlmv3_cil_incremental_{args.unseen_classes}_best.pt")
     best_ckpt = torch.load(best_path, map_location=device)
     model.load_state_dict(best_ckpt['model_state_dict'])
+    if args.derpp:
+        # the new class's exemplars (herding with the best model) join the memory with its logits
+        new_idx = label_space.index(unseen_classes[-1])
+        new_handler = ExemplarHandler(max_exemplars_per_class=args.max_exemplars, selection_method=args.exemplar_selection)
+        new_handler.update_exemplars(unseen_train_loader.dataset, [new_idx], model, device)
+        new_ex = new_handler.get_exemplar_dataset()
+        memory.add(new_ex, [new_idx] * len(new_ex), compute_logits(derpp_fwd, new_ex, default_collate, args.batch_size, model))
+        memory.save(memory_path(best_path))
+        print(f"Saved the DER++ memory ({len(memory)} exemplars) -> {memory_path(best_path)}")
     if args.use_bias_correction:
         center_classifier_bias(model)
     model.eval()
