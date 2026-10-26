@@ -44,6 +44,38 @@ def eaml_collate(dataset):
     return collate
 
 
+def adjacency_allocation(dataset, previous_classes, new_class, model_path, per_class, batch_size, tau, n_min,
+                         n_feat=200):
+    """Adjacency-aware replay (utils/class_IL/adjacency.py): adjacency of every previous class to the new class with
+    the previous model (fused feature, n_feat training documents per class) and the split of the uniform budget
+    per_class x len(previous_classes). Returns {"adjacency": {...}, "exemplars": {...}}."""
+    from utils.class_IL.adjacency import allocate, class_adjacency, describe, features_by_class
+    from utils.data_subset import select_per_class
+    prev = EAMLModel(num_classes=len(previous_classes)).to(DEVICE)
+    ckpt = torch.load(model_path, map_location=DEVICE, weights_only=False)
+    prev.load_state_dict(ckpt.get("model_state_dict", ckpt), strict=False)
+    prev.eval()
+    del ckpt
+    collate = eaml_collate(dataset)
+
+    def extract(samples):
+        b = collate(samples)
+        return prev.extract_features(images=b["images"].to(DEVICE),
+                                     texts={k: v.to(DEVICE) for k, v in b["texts"].items()})
+    by_class = {}
+    for c in previous_classes + [new_class]:
+        docs = [s for s in dataset.samples if s[2] == c]
+        keep = set(select_per_class([s[0] for s in docs], n_feat, 0, c))
+        by_class[c] = [s for s in docs if s[0] in keep]
+    feats = features_by_class(extract, by_class, batch_size)
+    adjacency = class_adjacency({c: feats[c] for c in previous_classes}, feats[new_class])
+    exemplars = allocate(adjacency, per_class * len(previous_classes), tau, n_min)
+    print(f"Adjacency-aware replay (tau {tau}, min {n_min}), adding '{new_class}':\n" + describe(adjacency, exemplars))
+    del prev
+    torch.cuda.empty_cache()
+    return {"adjacency": adjacency, "exemplars": exemplars}
+
+
 def get_unseen_classes(base_classes: List[str], all_classes: List[str]) -> List[str]:
     return [cls for cls in all_classes if cls not in base_classes]
 
@@ -80,7 +112,10 @@ def run_incremental_learning(
     use_bias_correction: bool = False,
     derpp: bool = False,
     derpp_alpha: float = 0.1,
-    derpp_beta: float = 0.5
+    derpp_beta: float = 0.5,
+    exemplar_allocation: str = "uniform",
+    alloc_tau: float = 0.2,
+    alloc_min: int = 10
 ):
     import shutil
     from torch.utils.data import WeightedRandomSampler, DataLoader
@@ -142,6 +177,7 @@ def run_incremental_learning(
 
     ewc = None
 
+    step_allocation = None                 # adjacency-aware replay: adjacencies and exemplars of the last step
     for unseen_idx, new_class in enumerate(unseen_classes[start_unseen_index:], start=start_unseen_index):
         if unseen_idx > start_unseen_index:
             start_epoch = 0
@@ -175,6 +211,11 @@ def run_incremental_learning(
                 new_data_samples = [s for s in train_dataset.samples if s[2] == new_class]
                 replay_samples = []
                 if use_exemplars and exemplar_mgr is not None:
+                    if exemplar_allocation == "adjacency" and previous_classes:
+                        step_allocation = adjacency_allocation(train_dataset, previous_classes, new_class,
+                                                               base_model_path, exemplar_mgr.max_per_class, batch_size,
+                                                               alloc_tau, alloc_min)
+                        exemplar_mgr.per_class = step_allocation["exemplars"]
                     fill_exemplar_memory(exemplar_mgr, train_dataset, previous_classes, base_model_path,
                                          len(previous_classes), DEVICE)
                     replay_samples = [s for c in previous_classes for s in exemplar_mgr.exemplars.get(c, [])]
@@ -457,7 +498,8 @@ def run_incremental_learning(
                                             ocr_data=ocr_tensor_path) if future_classes else None
         save_predictions(final_model, DEVICE, checkpoint_dir, f"cil_{new_class}", learned_classes,
                          {"seen": (test_loader_full, learned_classes), "unseen": (future_loader, future_classes)},
-                         evm=None, ood_detector=None, new_class=new_class, checkpoint=final_global_best_path)
+                         evm=None, ood_detector=None, new_class=new_class, checkpoint=final_global_best_path,
+                         **({"allocation": step_allocation} if step_allocation else {}))
 
 
 if __name__ == "__main__":
@@ -497,13 +539,17 @@ if __name__ == "__main__":
                    'stored logits; the training data is the new class only (needs --use_exemplars)')
     p.add_argument('--derpp_alpha', type=float, default=0.1, help='DER++ weight of the logit matching')
     p.add_argument('--derpp_beta', type=float, default=0.5, help='DER++ weight of the replay cross-entropy')
+    p.add_argument('--exemplar_allocation', choices=['uniform', 'adjacency'], default='uniform',
+                   help='adjacency: split the exemplar budget by each old class\'s similarity to the new class')
+    p.add_argument('--alloc_tau', type=float, default=0.2, help='adjacency-aware replay: softmax temperature')
+    p.add_argument('--alloc_min', type=int, default=10, help='adjacency-aware replay: minimum exemplars per class')
     add_seed_arg(p)
     args = p.parse_args()
     if args.derpp and not args.use_exemplars:
         p.error("--derpp needs --use_exemplars")
     set_seed(args.seed)
-    run_log.init("eaml", "CIL", "DER++" if args.derpp else
-                 run_log.baseline_method(args.joint_training, args.use_exemplars, args.use_ewc), args)
+    run_log.init("eaml", "CIL", "DER++" if args.derpp else "Adjacency replay" if args.exemplar_allocation == "adjacency"
+                 else run_log.baseline_method(args.joint_training, args.use_exemplars, args.use_ewc), args)
 
     run_incremental_learning(
         data_root=args.data_dir,
@@ -537,5 +583,8 @@ if __name__ == "__main__":
         patience=args.patience,
         derpp=args.derpp,
         derpp_alpha=args.derpp_alpha,
-        derpp_beta=args.derpp_beta
+        derpp_beta=args.derpp_beta,
+        exemplar_allocation=args.exemplar_allocation,
+        alloc_tau=args.alloc_tau,
+        alloc_min=args.alloc_min
     )

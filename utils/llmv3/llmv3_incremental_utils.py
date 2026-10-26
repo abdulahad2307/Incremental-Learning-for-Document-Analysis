@@ -100,6 +100,7 @@ def distillation_loss(new_logits, old_logits, temperature=2.0, alpha=0.5):
 class ExemplarHandler:
     def __init__(self, max_exemplars_per_class=20, selection_method="random"):
         self.max_exemplars_per_class = max_exemplars_per_class
+        self.per_class = {}          # adjacency-aware replay: {label index: exemplars}; others max_exemplars_per_class
         self.selection_method = selection_method
         self.exemplars = {}
 
@@ -143,7 +144,7 @@ class ExemplarHandler:
 
                 features_accum = features.clone()
 
-                for _ in range(min(self.max_exemplars_per_class, len(indices))):
+                for _ in range(min(self.per_class.get(cls, self.max_exemplars_per_class), len(indices))):
                     distances = torch.norm(class_mean - features_accum, dim=1)
                     min_idx = torch.argmin(distances).item()
                     selected_idxs.append(indices[min_idx])
@@ -156,7 +157,8 @@ class ExemplarHandler:
             else:
                 # Random exemplar selection
                 cls_indices = [i for i in range(len(dataset)) if dataset[i]['labels'].item() == cls]
-                selected_idxs = random.sample(cls_indices, min(self.max_exemplars_per_class, len(cls_indices)))
+                selected_idxs = random.sample(cls_indices, min(self.per_class.get(cls, self.max_exemplars_per_class),
+                                                               len(cls_indices)))
                 self.exemplars[cls] = [dataset[idx] for idx in selected_idxs]
 
     def get_exemplar_dataset(self):
