@@ -69,6 +69,10 @@ class TestLayoutDIL(PipelineTestCase):
     def test_joint_upper_bound(self):
         self.run_bound("joint", ["--joint_training"], ["Joint training on both domains"], "Joint")
 
+    def test_joint_balanced_upper_bound(self):
+        self.run_bound("joint_bal", ["--joint_training", "--joint_balance", "domain"],
+                       ["Joint training on both domains", "Domain-balanced joint sampling"], "Joint (balanced)")
+
 
 add_matrix_tests(TestLayoutDIL, METHODS, run_method)
 
