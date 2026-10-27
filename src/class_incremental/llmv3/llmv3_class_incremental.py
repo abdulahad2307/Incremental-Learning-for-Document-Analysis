@@ -54,6 +54,10 @@ def parse_args():
                         'their stored logits; the training data is the new class only')
     parser.add_argument('--derpp_alpha', type=float, default=0.1, help='DER++ weight of the logit matching')
     parser.add_argument('--derpp_beta', type=float, default=0.5, help='DER++ weight of the replay cross-entropy')
+    parser.add_argument('--exemplar_allocation', choices=['uniform', 'adjacency'], default='uniform',
+                        help="adjacency: split the exemplar budget by each old class's similarity to the new class")
+    parser.add_argument('--alloc_tau', type=float, default=0.2, help='adjacency-aware replay: softmax temperature')
+    parser.add_argument('--alloc_min', type=int, default=10, help='adjacency-aware replay: minimum exemplars per class')
     add_seed_arg(parser)
     return parser.parse_args()
 
@@ -64,10 +68,35 @@ def llmv3_forward(model, device):
     return lambda b: model(**{k: b[k].to(device) for k in keys})
 
 
+def adjacency_allocation(model, old_dataset, new_dataset, old_classes, new_class, per_class, args, device, n_feat=200):
+    """Adjacency-aware replay (utils/class_IL/adjacency.py): adjacency of every old class to the new class with the
+    previous model (cls feature; the classifier was only just expanded, the features are the previous model's), on
+    n_feat training documents per class, and the split of the uniform budget per_class x len(old_classes)."""
+    import random
+    from utils.class_IL.adjacency import allocate, class_adjacency, describe, features_by_class
+    keys = ("input_ids", "bbox", "attention_mask", "pixel_values")
+
+    def pick(dataset, c):
+        idx = [i for i, smp in enumerate(dataset.samples) if smp[2] == c]
+        return [dataset[i] for i in sorted(random.Random(f"0:{c}").sample(idx, min(n_feat, len(idx))))]
+    model.eval()
+    by_class = {c: pick(old_dataset, c) for c in old_classes}
+    by_class[new_class] = pick(new_dataset, new_class)
+    extract = lambda items: model.extract_features(**{k: v.to(device) for k, v in default_collate(items).items()
+                                                      if k in keys})
+    feats = features_by_class(extract, by_class, args.batch_size)
+    adjacency = class_adjacency({c: feats[c] for c in old_classes}, feats[new_class])
+    exemplars = allocate(adjacency, per_class * len(old_classes), args.alloc_tau, args.alloc_min)
+    print(f"Adjacency-aware replay (tau {args.alloc_tau}, min {args.alloc_min}), adding '{new_class}':\n"
+          + describe(adjacency, exemplars))
+    return {"adjacency": adjacency, "exemplars": exemplars}
+
+
 def main():
     args = parse_args()
     set_seed(args.seed)
     run_log.init("llmv3", "CIL", "DER++" if args.derpp else
+                 "Adjacency replay" if args.exemplar_allocation == "adjacency" else
                  run_log.baseline_method(args.joint_training, args.max_exemplars > 0, args.use_ewc),
                  args, new_class=args.unseen_classes)
     device = torch.device(args.device)
@@ -161,8 +190,13 @@ def main():
     print("Preparing exemplars from base classes ...")
     base_class_indices = [label_space.index(c) for c in base_classes]
     exemplar_samples = []                # --max_exemplars 0: no replay (fine-tuning lower bound)
+    step_allocation = None               # adjacency-aware replay: adjacencies and exemplars per old class
     if args.max_exemplars > 0 and not args.joint_training:
         exemplar_handler = ExemplarHandler(max_exemplars_per_class=args.max_exemplars, selection_method=args.exemplar_selection)
+        if args.exemplar_allocation == "adjacency":
+            step_allocation = adjacency_allocation(model, base_train_loader.dataset, unseen_train_loader.dataset,
+                                                   base_classes, unseen_classes[-1], args.max_exemplars, args, device)
+            exemplar_handler.per_class = {label_space.index(c): n for c, n in step_allocation["exemplars"].items()}
         exemplar_handler.update_exemplars(base_train_loader.dataset, base_class_indices, model, device)
         exemplar_samples = exemplar_handler.get_exemplar_dataset()
 
@@ -373,7 +407,8 @@ def main():
     ) if future_classes else None
     save_predictions(model, device, args.checkpoint_dir, f"cil_{unseen_classes[-1]}", label_space,
                      {"seen": (test_loader, label_space), "unseen": (future_loader, future_classes)},
-                     evm=None, ood_detector=None, new_class=unseen_classes[-1], checkpoint=best_path)
+                     evm=None, ood_detector=None, new_class=unseen_classes[-1], checkpoint=best_path,
+                     **({"allocation": step_allocation} if step_allocation else {}))
 
 if __name__ == "__main__":
     main()

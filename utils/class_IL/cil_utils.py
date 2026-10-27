@@ -328,6 +328,7 @@ class ExemplarManager:
         self.max_candidates = max_candidates  # herding runs on a random pool of this many samples per class
         self.max_exemplars = max_exemplars
         self.max_per_class = max_per_class
+        self.per_class = {}          # adjacency-aware replay: {class: exemplars}; absent classes get max_per_class
         self.selection_strategy = selection_strategy
         self.feature_extractor = None
         
@@ -335,6 +336,10 @@ class ExemplarManager:
         """Set the feature extractor model for herding selection"""
         self.feature_extractor = model
         
+    def quota(self, class_name):
+        """Exemplars to keep for a class: its share of an adjacency-aware split, else max_per_class."""
+        return self.per_class.get(class_name, self.max_per_class)
+
     def update(self, dataset, class_name, model=None):
         """Update exemplar set with examples from a new class"""
         if self.selection_strategy == "herding" and model is not None:
@@ -342,16 +347,17 @@ class ExemplarManager:
         else:
             self.exemplars[class_name] = self._select_random(dataset, class_name)
             
-        # Reducing exemplar set if needed
-        self._balance_exemplar_set()
+        # Reducing exemplar set if needed (not with an adjacency-aware split, which already sums to the budget)
+        if not self.per_class:
+            self._balance_exemplar_set()
         
     def _select_random(self, dataset, class_name):
         """Select random exemplars for a class"""
         import random
         class_samples = [s for s in dataset.samples if s[2] == class_name]
-        if len(class_samples) <= self.max_per_class:
+        if len(class_samples) <= self.quota(class_name):
             return class_samples
-        return random.sample(class_samples, self.max_per_class)
+        return random.sample(class_samples, self.quota(class_name))
     
     def _select_herding(self, dataset, class_name, model):
         import warnings
@@ -361,7 +367,7 @@ class ExemplarManager:
         if len(class_samples) == 0:
             warnings.warn(f"No samples found for class {class_name}. Returning empty exemplar set.")
             return []
-        if len(class_samples) <= self.max_per_class:
+        if len(class_samples) <= self.quota(class_name):
             return class_samples
         if self.max_candidates and len(class_samples) > self.max_candidates:
             class_samples = random.Random(0).sample(class_samples, self.max_candidates)
@@ -404,7 +410,7 @@ class ExemplarManager:
         selected_indices = []
         selected_features = []
 
-        pick_n = min(self.max_per_class, len(features))
+        pick_n = min(self.quota(class_name), len(features))
 
         for _ in range(pick_n):
             candidate_indices = [i for i in range(len(features)) if i not in selected_indices]
