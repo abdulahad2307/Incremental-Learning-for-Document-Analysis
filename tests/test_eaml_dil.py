@@ -69,6 +69,11 @@ class TestEAMLDIL(PipelineTestCase):
                                                     "--use_bias_correction") + ["--joint_training"],
                        ["Joint training on both domains"], "Joint")
 
+    def test_joint_balanced_upper_bound(self):
+        self.run_bound("joint_bal", lambda out: without(dil_args(self.data, out, "standard"), "--use_ewc", "--use_exemplars",
+                                                        "--use_bias_correction") + ["--joint_training", "--joint_balance", "domain"],
+                       ["Joint training on both domains", "Domain-balanced joint sampling"], "Joint (balanced)")
+
 
 add_matrix_tests(TestEAMLDIL, METHODS, run_method)
 

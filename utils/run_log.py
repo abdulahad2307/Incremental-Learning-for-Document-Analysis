@@ -77,11 +77,12 @@ def _jsonable(v):
     return v if isinstance(v, (int, str, bool)) or v is None else str(v)
 
 
-def baseline_method(joint_training=False, replay=True, ewc=True):
+def baseline_method(joint_training=False, replay=True, ewc=True, joint_balance="none"):
     """Method name of the No-EVM scripts, by their flags: "Joint" (upper bound: all data seen so far),
-    "Fine-tuning" (lower bound: no replay, no EWC) or "No EVM" (ER + EWC + BC)."""
+    "Joint (balanced)" (the same, domains drawn equally often; DIL), "Fine-tuning" (lower bound: no replay, no EWC)
+    or "No EVM" (ER + EWC + BC)."""
     if joint_training:
-        return "Joint"
+        return "Joint (balanced)" if joint_balance == "domain" else "Joint"
     return "No EVM" if replay or ewc else "Fine-tuning"
 
 

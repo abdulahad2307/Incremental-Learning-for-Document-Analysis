@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import gc
 from torch.utils.data import DataLoader, ConcatDataset
 from utils.seed import add_seed_arg, set_seed
+from utils.domain_IL.joint_sampling import JOINT_BALANCE, joint_loader
 from utils.llmv3.llmv3_model_loader import load_llmv3_checkpoint
 from utils.llmv3.llmv3_il_common import add_il_args, make_teacher, distill_term, center_classifier_bias, gil as gil_ratio
 from utils import run_log
@@ -49,6 +50,8 @@ def parse_args():
     parser.add_argument('--images_per_class', type=int, help="Max images per class for incremental domain")
     parser.add_argument('--joint_training', action='store_true',
                         help="Train on both domains' training data (upper-bound baseline) instead of Tobacco-3482 + replay")
+    parser.add_argument('--joint_balance', choices=JOINT_BALANCE, default='none',
+                        help='With --joint_training: "domain" draws both domains equally often (same epoch length)')
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
     add_il_args(parser, strategy_default="standard", evm=False, persist=False)
@@ -59,7 +62,7 @@ def parse_args():
 def main():
     args = parse_args()
     set_seed(args.seed)
-    run_log.init("llmv3", "DIL", run_log.baseline_method(args.joint_training, args.max_exemplars > 0, args.use_ewc), args)
+    run_log.init("llmv3", "DIL", run_log.baseline_method(args.joint_training, args.max_exemplars > 0, args.use_ewc, args.joint_balance), args)
     device = torch.device(args.device)
     os.makedirs(args.checkpoint_dir, exist_ok=True)
 
@@ -195,6 +198,9 @@ def main():
     # Combine incremental domain dataset and base domain exemplars (or all its training data) for training
     combined_dataset = ConcatDataset([inc_train_loader.dataset, exemplar_samples])
     combined_loader = DataLoader(combined_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
+    if args.joint_training:
+        combined_loader = joint_loader([inc_train_loader.dataset, exemplar_samples], args.batch_size,
+                                       args.joint_balance, args.seed)
     print("Exemplar dataset prepared.")
 
     print(f"Total exemplar samples: {len(exemplar_samples)}")

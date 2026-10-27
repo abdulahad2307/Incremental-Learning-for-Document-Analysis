@@ -15,9 +15,11 @@
 #   finetune  lower bound: Tobacco-3482 only; no replay, no EWC, no KD, no bias correction
 #   joint     upper bound: Tobacco-3482 and the base model's RVL-CDIP training documents, shuffled together
 #             (an epoch covers RVL-CDIP's training set; resume with RESUME_CKPT if it hits the time limit)
+#   joint_balanced  upper bound as joint, with both domains drawn equally often (same epoch length; output joint_bal_std)
 # Submit from the repo root (paths and classes: scripts/config.sh):
 #   sbatch scripts/domain_incremental/eaml/run_domainIL_bound.sh finetune
 #   sbatch -J 4_dil_eaml_joint scripts/domain_incremental/eaml/run_domainIL_bound.sh joint
+#   sbatch -J 4_dil_eaml_joint_bal scripts/domain_incremental/eaml/run_domainIL_bound.sh joint_balanced
 
 unset SLURM_EXPORT_ENV
 module load cuda/12.6
@@ -25,13 +27,15 @@ module load python/3.12-conda
 conda activate mtil
 source "${SLURM_SUBMIT_DIR:-$PWD}/scripts/config.sh" || exit 1
 
-BOUND=${1:?usage: sbatch scripts/domain_incremental/eaml/run_domainIL_bound.sh finetune|joint}
+BOUND=${1:?usage: sbatch scripts/domain_incremental/eaml/run_domainIL_bound.sh finetune|joint|joint_balanced}
 case "$BOUND" in
     finetune) BOUND_ARGS=() ;;
     joint)    BOUND_ARGS=(--joint_training) ;;
-    *) echo "ERROR: bound must be finetune or joint" >&2; exit 1 ;;
+    joint_balanced) BOUND_ARGS=(--joint_training --joint_balance domain) ;;
+    *) echo "ERROR: bound must be finetune, joint or joint_balanced" >&2; exit 1 ;;
 esac
-CKPT_DIR=$DIL_ROOT/eaml/${BOUND}_std${DIL_SUFFIX}/seed$SEED
+RUN_NAME=${BOUND/joint_balanced/joint_bal}
+CKPT_DIR=$DIL_ROOT/eaml/${RUN_NAME}_std${DIL_SUFFIX}/seed$SEED
 require_file "$EAML_BASE_16" "train the base model first"
 require_file "$DATA_ROOT/$INC_DOMAIN"
 RESUME_CKPT=""                           # resume: a checkpoint in $CKPT_DIR
