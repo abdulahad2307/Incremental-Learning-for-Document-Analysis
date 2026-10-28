@@ -57,7 +57,7 @@ def add_mcnemar(rows, correct, keys, sets):
             r[f"p_vs_noevm_{s}"] = mcnemar(a, b)[2]
 
 
-def cil_rows(run_root, backbones):
+def cil_rows(run_root, backbones, max_steps=None):
     rows, matrices, correct = [], {}, {}
     bases = {}
     for (backbone, method_dir, seed), files in sorted(find_runs(run_root, "CIL").items()):
@@ -69,6 +69,8 @@ def cil_rows(run_root, backbones):
             print(f"[skip] no step-0 predictions for {backbone} (scripts/eval/run_base_predictions.sh)")
             continue
         steps, complete = load_cil_run(files, bases[backbone])
+        if max_steps:
+            steps = steps[:max_steps + 1]
         if len(steps) < 2:
             print(f"[skip] {backbone}/{method_dir}/seed{seed}: no step 1")
             continue
@@ -209,11 +211,19 @@ def main():
     ap.add_argument("--run_root", default=os.environ.get("RUN_ROOT", "/home/woody/iwi5/iwi5280h/il_runs"))
     ap.add_argument("--out_dir", default="results")
     ap.add_argument("--backbone", nargs="*", default=None, help="eaml / llmv3 / llmv3hf (default: all)")
+    ap.add_argument("--label_by_run", action="store_true",
+                    help="Name each row after its run folder too, e.g. 'EVM+OOD (evmood_std_le1)', so runs of the same "
+                         "method with other hyperparameters are kept apart (training sweep: --run_root $RUN_ROOT/sweep)")
+    ap.add_argument("--max_steps", type=int, default=None,
+                    help="Use only CIL steps 1..N of every run, e.g. 2 to compare the sweep with the default runs")
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
 
-    cil, matrices = cil_rows(args.run_root, args.backbone)
+    cil, matrices = cil_rows(args.run_root, args.backbone, args.max_steps)
     dil = dil_rows(args.run_root, args.backbone)
+    if args.label_by_run:
+        for r in cil + dil:
+            r["method"] = f"{r['method']} ({r['run']})"
     cil_sum = summarise(cil, KEYS + ["steps"])
     dil_sum = summarise(dil, KEYS + ["domain"])
     pd.DataFrame(cil).to_csv(os.path.join(args.out_dir, "cil_runs.csv"), index=False)
