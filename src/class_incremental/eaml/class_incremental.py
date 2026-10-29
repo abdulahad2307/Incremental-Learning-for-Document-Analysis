@@ -24,6 +24,7 @@ from utils.il_checks import warn_inactive_terms
 from utils.paper_recipe import eaml_optimizer, EAMLStepLR
 from utils.image_transforms import set_train_augmentation
 from utils.class_IL.derpp import DerppMemory, memory_path, compute_logits, train_epoch as derpp_train_epoch
+from utils.class_IL.adjacency import REPLAY_WEIGHTING, adjacency_method_name, replay_weights
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -115,7 +116,8 @@ def run_incremental_learning(
     derpp_beta: float = 0.5,
     exemplar_allocation: str = "uniform",
     alloc_tau: float = 0.2,
-    alloc_min: int = 10
+    alloc_min: int = 10,
+    replay_weighting: str = "balanced"
 ):
     import shutil
     from torch.utils.data import WeightedRandomSampler, DataLoader
@@ -229,11 +231,10 @@ def run_incremental_learning(
                 print(f"Joint training on all data of {len(current_classes)} classes (upper-bound baseline).")
 
             if use_balanced_sampler:
-                from collections import Counter
-                class_counts = Counter([s[2] for s in train_dataset.samples])
-                total = sum(class_counts.values())
-                class_weights = {cls: total/count for cls, count in class_counts.items()}
-                sample_weights = [class_weights[s[2]] for s in train_dataset.samples]
+                sample_weights = replay_weights([s[2] for s in train_dataset.samples],
+                                                [] if joint_training else [new_class], replay_weighting)
+                if replay_weighting != "balanced":
+                    print(f"Replay weighting '{replay_weighting}': old classes drawn in proportion to their exemplars")
                 sampler = WeightedRandomSampler(sample_weights, len(sample_weights), replacement=True)
                 train_loader = DataLoader(
                     train_dataset,
@@ -543,12 +544,14 @@ if __name__ == "__main__":
                    help='adjacency: split the exemplar budget by each old class\'s similarity to the new class')
     p.add_argument('--alloc_tau', type=float, default=0.2, help='adjacency-aware replay: softmax temperature')
     p.add_argument('--alloc_min', type=int, default=10, help='adjacency-aware replay: minimum exemplars per class')
+    p.add_argument('--replay_weighting', choices=REPLAY_WEIGHTING, default='balanced',
+                   help='With --use_balanced_sampler: "allocation" draws old classes in proportion to their exemplars')
     add_seed_arg(p)
     args = p.parse_args()
     if args.derpp and not args.use_exemplars:
         p.error("--derpp needs --use_exemplars")
     set_seed(args.seed)
-    run_log.init("eaml", "CIL", "DER++" if args.derpp else "Adjacency replay" if args.exemplar_allocation == "adjacency"
+    run_log.init("eaml", "CIL", "DER++" if args.derpp else adjacency_method_name(args) if args.exemplar_allocation == "adjacency"
                  else run_log.baseline_method(args.joint_training, args.use_exemplars, args.use_ewc), args)
 
     run_incremental_learning(
@@ -586,5 +589,6 @@ if __name__ == "__main__":
         derpp_beta=args.derpp_beta,
         exemplar_allocation=args.exemplar_allocation,
         alloc_tau=args.alloc_tau,
-        alloc_min=args.alloc_min
+        alloc_min=args.alloc_min,
+        replay_weighting=args.replay_weighting
     )

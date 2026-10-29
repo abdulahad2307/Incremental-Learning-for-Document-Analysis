@@ -120,7 +120,8 @@ def _dataset_labels(ds):
 
 def build_cil_train_loader(args, unseen_train_loader, exemplar_samples, label_space):
     """Training data of a LayoutLMv3 CIL step: new class + exemplars (default) or, with --joint_training, all
-    training data of the classes seen so far; --use_balanced_sampler draws classes equally often."""
+    training data of the classes seen so far; --use_balanced_sampler draws classes equally often (with
+    --replay_weighting allocation: old classes in proportion to their exemplars, utils/class_IL/adjacency.py)."""
     if args.joint_training:
         from utils.llmv3.llmv3_incremental_dataloader import get_incremental_dataloader
         dataset = get_incremental_dataloader(
@@ -132,10 +133,13 @@ def build_cil_train_loader(args, unseen_train_loader, exemplar_samples, label_sp
     else:
         dataset = ConcatDataset([unseen_train_loader.dataset, exemplar_samples])
     if args.use_balanced_sampler:
+        from utils.class_IL.adjacency import replay_weights
         labels = np.array(_dataset_labels(dataset))
         counts = np.bincount(labels)
-        weights = 1.0 / counts[labels]
-        sampler = WeightedRandomSampler(torch.as_tensor(weights, dtype=torch.double), len(labels), replacement=True)
-        print(f"Balanced sampler over {len(counts[counts > 0])} classes (samples per class: {counts[counts > 0].tolist()})")
+        mode = getattr(args, "replay_weighting", "balanced")
+        new_labels = [] if args.joint_training else sorted(set(_dataset_labels(unseen_train_loader.dataset)))
+        sampler = WeightedRandomSampler(replay_weights(labels, new_labels, mode), len(labels), replacement=True)
+        print(f"Balanced sampler over {len(counts[counts > 0])} classes (samples per class: {counts[counts > 0].tolist()})"
+              + (f"; replay weighting '{mode}': old classes drawn in proportion to their exemplars" if mode != "balanced" else ""))
         return DataLoader(dataset, batch_size=args.batch_size, sampler=sampler, num_workers=4)
     return DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
