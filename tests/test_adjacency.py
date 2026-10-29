@@ -1,5 +1,6 @@
 """Adjacency-aware replay (utils/class_IL/adjacency.py): the allocation, the per-class quotas of both exemplar
-managers, and one CIL step per backbone with --exemplar_allocation adjacency."""
+managers, the replay weighting, and one CIL step per backbone with --exemplar_allocation adjacency (with balanced and
+with allocation-proportional replay weighting)."""
 import glob
 import os
 import unittest
@@ -10,7 +11,7 @@ from tests.fixtures import CIL_BASE, CIL_NEW
 from tests.runner import PipelineTestCase, check_predictions, out_dir, run_script
 from tests.test_eaml_cil import cil_args as eaml_args
 from tests.test_layout_cil import cil_args as layout_args
-from utils.class_IL.adjacency import allocate, class_adjacency
+from utils.class_IL.adjacency import allocate, class_adjacency, replay_weights
 
 
 class TestAllocation(unittest.TestCase):
@@ -40,6 +41,33 @@ class TestAllocation(unittest.TestCase):
         self.assertLess(adj["other"], 0.2)
 
 
+class TestReplayWeights(unittest.TestCase):
+    LABELS = ["near"] * 60 + ["far"] * 20 + ["new"] * 500
+
+    def share(self, w, c):
+        return float(w[np.array(self.LABELS) == c].sum())
+
+    def test_balanced_draws_classes_equally(self):
+        w = replay_weights(self.LABELS, ["new"], "balanced")
+        for c in ("near", "far", "new"):
+            self.assertAlmostEqual(self.share(w, c), 1 / 3)
+
+    def test_allocation_follows_the_budget(self):
+        w = replay_weights(self.LABELS, ["new"], "allocation")
+        self.assertAlmostEqual(self.share(w, "new"), 1 / 3)                     # the new class keeps its share
+        self.assertAlmostEqual(self.share(w, "near"), 2 / 3 * 60 / 80)          # old classes by their exemplars
+        self.assertAlmostEqual(self.share(w, "far"), 2 / 3 * 20 / 80)
+
+    def test_uniform_budget_is_balanced(self):
+        labels = ["a"] * 20 + ["b"] * 20 + ["new"] * 300
+        self.assertTrue(np.allclose(replay_weights(labels, ["new"], "allocation"),
+                                    replay_weights(labels, ["new"], "balanced")))
+
+    def test_unknown_mode(self):
+        with self.assertRaises(ValueError):
+            replay_weights(["a"], [], "inverse")
+
+
 class TestQuotas(unittest.TestCase):
     def test_eaml_manager(self):
         from utils.class_IL.cil_utils import ExemplarManager
@@ -57,9 +85,9 @@ class TestQuotas(unittest.TestCase):
 
 
 class TestAdjacencyPipeline(PipelineTestCase):
-    def check(self, out):
+    def check(self, out, method="Adjacency replay"):
         from utils.eval.predictions import load_predictions
-        check_predictions(self, out, f"cil_{CIL_NEW}", ["seen", "unseen"], method="Adjacency replay")
+        check_predictions(self, out, f"cil_{CIL_NEW}", ["seen", "unseen"], method=method)
         meta = load_predictions(glob.glob(os.path.join(out, "predictions", f"cil_{CIL_NEW}_seed*.pt"))[0])["meta"]
         alloc = meta["allocation"]
         self.assertEqual(sorted(alloc["exemplars"]), sorted(CIL_BASE))
@@ -81,6 +109,25 @@ class TestAdjacencyPipeline(PipelineTestCase):
                    layout_args(self.data, base, CIL_BASE, CIL_NEW, out, "standard") + ["--exemplar_allocation", "adjacency"],
                    cwd=out, expect_logs=["Adjacency-aware replay"])
         self.check(out)
+
+    def test_eaml_weighted(self):
+        out = out_dir("adjacency", "eaml_weighted")
+        base = os.path.join(self.data, "ckpt", "eaml_base_3.pt")
+        run_script(self, "src/class_incremental/eaml/class_incremental.py",
+                   eaml_args(self.data, base, CIL_BASE, CIL_NEW, out, "standard")
+                   + ["--exemplar_allocation", "adjacency", "--replay_weighting", "allocation"],
+                   cwd=out, expect_files=[os.path.join(out, f"best_model_{CIL_NEW}.pth")],
+                   expect_logs=["Adjacency-aware replay", "Replay weighting 'allocation'"])
+        self.check(out, "Adjacency replay (weighted)")
+
+    def test_layout_weighted(self):
+        out = out_dir("adjacency", "layout_weighted")
+        base = os.path.join(self.data, "ckpt", "llmv3_base_3.pt")
+        run_script(self, "src/class_incremental/llmv3/llmv3_class_incremental.py",
+                   layout_args(self.data, base, CIL_BASE, CIL_NEW, out, "standard")
+                   + ["--exemplar_allocation", "adjacency", "--replay_weighting", "allocation"],
+                   cwd=out, expect_logs=["Adjacency-aware replay", "replay weighting 'allocation'"])
+        self.check(out, "Adjacency replay (weighted)")
 
 
 if __name__ == "__main__":

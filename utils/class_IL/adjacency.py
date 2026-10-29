@@ -10,9 +10,41 @@ class. The total budget stays the same; the at-risk classes get more of it.
   n_c = n_min + (B - n_min * K) * softmax(a / tau)_c, rounded so that sum_c n_c = B   (K old classes)
 Defaults (fixed before any result): tau = 0.2, n_min = 10, i.e. every class keeps at least half of the uniform
 budget of 20; at step 1 the most adjacent class (scientific_report) gets 100 of the 220 exemplars.
+
+With the class-balanced sampler (--use_balanced_sampler), every class is drawn equally often whatever its number of
+exemplars, so the split above changes only how varied a class's replay is, not how much it weighs in training.
+--replay_weighting allocation (replay_weights) draws the old classes in proportion to their exemplars instead: the
+new classes keep their balanced share 1 / K, and the old classes share the rest by their budget. With a uniform split
+this is the balanced sampler again. Pre-registered as the second and last adjacency pilot (step 1, both backbones).
 """
 import numpy as np
 import torch
+
+REPLAY_WEIGHTING = ("balanced", "allocation")
+
+
+def adjacency_method_name(args):
+    """Method name of an adjacency-replay run in the result tables."""
+    weighted = getattr(args, "replay_weighting", "balanced") == "allocation"
+    return "Adjacency replay (weighted)" if weighted else "Adjacency replay"
+
+
+def replay_weights(labels, new_labels, mode="balanced"):
+    """Sampling weight of every training sample (labels: one per sample; new_labels: the step's new classes).
+    balanced: every class equally often. allocation: each new class 1 / K of the draws (K classes), the old classes
+    the rest in proportion to their number of exemplars (every exemplar equally often)."""
+    if mode not in REPLAY_WEIGHTING:
+        raise ValueError(f"replay weighting must be one of {REPLAY_WEIGHTING}, got {mode!r}")
+    labels = np.asarray(labels)
+    classes, inverse, counts = np.unique(labels, return_inverse=True, return_counts=True)
+    w = 1.0 / counts[inverse]
+    if mode == "allocation":
+        new = np.isin(labels, list(new_labels))
+        n_new_classes = len(set(labels[new].tolist()))
+        old_share = (len(classes) - n_new_classes) / len(classes)
+        if (~new).any():
+            w = np.where(new, 1.0 / (len(classes) * counts[inverse]), old_share / (~new).sum())
+    return torch.as_tensor(w / w.sum(), dtype=torch.double)
 
 
 def normalised_mean(feats):

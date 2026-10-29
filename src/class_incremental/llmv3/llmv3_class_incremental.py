@@ -20,6 +20,7 @@ from utils.llmv3.llmv3_incremental_utils import (
 )
 import torch.optim as optim
 from utils.class_IL.derpp import DerppMemory, memory_path, compute_logits, derpp_replay_loss
+from utils.class_IL.adjacency import REPLAY_WEIGHTING, adjacency_method_name
 from tqdm import tqdm
 from utils.paper_recipe import llmv3_optimizer, FixedLR
 
@@ -58,6 +59,8 @@ def parse_args():
                         help="adjacency: split the exemplar budget by each old class's similarity to the new class")
     parser.add_argument('--alloc_tau', type=float, default=0.2, help='adjacency-aware replay: softmax temperature')
     parser.add_argument('--alloc_min', type=int, default=10, help='adjacency-aware replay: minimum exemplars per class')
+    parser.add_argument('--replay_weighting', choices=REPLAY_WEIGHTING, default='balanced',
+                        help='With --use_balanced_sampler: "allocation" draws old classes in proportion to their exemplars')
     add_seed_arg(parser)
     return parser.parse_args()
 
@@ -96,7 +99,7 @@ def main():
     args = parse_args()
     set_seed(args.seed)
     run_log.init("llmv3", "CIL", "DER++" if args.derpp else
-                 "Adjacency replay" if args.exemplar_allocation == "adjacency" else
+                 adjacency_method_name(args) if args.exemplar_allocation == "adjacency" else
                  run_log.baseline_method(args.joint_training, args.max_exemplars > 0, args.use_ewc),
                  args, new_class=args.unseen_classes)
     device = torch.device(args.device)
