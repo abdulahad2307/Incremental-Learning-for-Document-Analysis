@@ -66,12 +66,32 @@ class IncrementalEVM:
         dists = pairwise_distances([point], negatives, metric=self.distance_metric).flatten()
         t = max(int(len(dists) * self.tailsize), 1) if self.tailsize < 1.0 else min(int(self.tailsize), len(dists))
         tails = np.sort(dists)[:t] / 2.0  # half-distances (EVM margin)
-        try:
-            shape, loc, scale = weibull_min.fit(tails, floc=0)
-        except Exception:
-            shape, scale = 1., np.mean(tails)
+        scale, shape = self.weibull_mle(tails)
         max_tail = np.max(tails)
         return scale, shape, max_tail
+
+    @staticmethod
+    def weibull_mle(tails):
+        """(scale, shape) of the maximum-likelihood Weibull (loc 0) of a tail of half-distances.
+        scipy's default start can end in a wrong optimum, e.g. shape 0.2 and scale 5559 for half-distances of
+        5.9-10.2: an extreme vector that includes every sample, which the set cover then keeps as the class's only one
+        (tests/assets/ievm_degenerate_tail.npy). A fit with shape < 1 is therefore repeated from the shape given by the
+        spread of the log-distances, std(log x) = pi / (sqrt(6) shape), and the fit with the higher likelihood is
+        kept. Fits with shape >= 1 are returned unchanged."""
+        try:
+            shape, _, scale = weibull_min.fit(tails, floc=0)
+        except Exception:
+            shape, scale = 1., np.mean(tails)
+        if shape < 1:
+            try:
+                start = np.pi / (np.sqrt(6) * max(np.std(np.log(tails)), 1e-8))
+                shape2, _, scale2 = weibull_min.fit(tails, start, floc=0)
+                if (weibull_min.logpdf(tails, shape2, scale=scale2).sum()
+                        > weibull_min.logpdf(tails, shape, scale=scale).sum()):
+                    shape, scale = shape2, scale2
+            except Exception:
+                pass
+        return scale, shape
 
 
     def fit(self, features_dict):
