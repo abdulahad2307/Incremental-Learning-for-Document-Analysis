@@ -53,6 +53,7 @@ def train_one_epoch_dil_with_evm_ood(
     ood_detector=None,
     lambda_evm=0.1,
     lambda_ood=0.1,
+    ood_energy_grad=False,
 ):
     model.train()
     total_loss = 0
@@ -85,7 +86,7 @@ def train_one_epoch_dil_with_evm_ood(
             if evm_loss is not None:
                 extra_loss = lambda_evm * evm_loss
             # L_OOD (ViM virtual-logit penalty) over samples of pretrained-domain classes
-            ood_loss = vim_ood_loss(ood_detector, features, logits, labels)
+            ood_loss = vim_ood_loss(ood_detector, features, logits, labels, energy_grad=ood_energy_grad)
             if ood_loss is not None:
                 extra_loss = extra_loss + lambda_ood * ood_loss
 
@@ -140,6 +141,7 @@ def run_domain_incremental_evm_ood(
     resume_ckpt_path=None,
     lambda_evm=0.1,
     lambda_ood=0.1,
+    ood_energy_grad=False,
     ood_method="msp",
     ood_tpr=0.95,
     ood_max_per_class=500,
@@ -253,6 +255,7 @@ def run_domain_incremental_evm_ood(
             ood_detector=ood_vim,
             lambda_evm=lambda_evm,
             lambda_ood=lambda_ood,
+            ood_energy_grad=ood_energy_grad,
         )
         set_train_augmentation(train_loader, False)
 
@@ -391,6 +394,8 @@ if __name__ == "__main__":
     p.add_argument('--resume_ckpt_path', type=str)
     p.add_argument('--lambda_evm', type=float, default=0.1)
     p.add_argument('--lambda_ood', type=float, default=0.1)
+    p.add_argument('--ood_energy_grad', action='store_true',
+                   help="L_OOD also through the logits' energy (original formulation; it inflates the classifier, ablation)")
     p.add_argument('--ood_method', type=str, default='msp', choices=['msp', 'vim', 'gradnorm'])
     p.add_argument('--ood_tpr', type=float, default=0.95, help='Fraction of in-distribution val samples accepted; sets the OOD threshold')
     p.add_argument('--ood_max_per_class', type=int, default=500, help='Samples per class used for OOD fitting/calibration/testing')
@@ -428,6 +433,7 @@ if __name__ == "__main__":
         resume_ckpt_path=args.resume_ckpt_path,
         lambda_evm=args.lambda_evm,
         lambda_ood=args.lambda_ood,
+        ood_energy_grad=args.ood_energy_grad,
         ood_method=args.ood_method,
         ood_tpr=args.ood_tpr,
         ood_max_per_class=args.ood_max_per_class,

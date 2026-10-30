@@ -42,6 +42,8 @@ def add_il_args(parser, strategy_default="standard", evm=False, ood=False, persi
              help="Save the EVM (and ViM) after the step and load it in the next job (default: in-memory only)")
     if ood:
         _add(parser, "--lambda_ood", type=float, default=0.1)
+        _add(parser, "--ood_energy_grad", action="store_true",
+             help="L_OOD also through the logits' energy (original formulation; it inflates the classifier, ablation)")
         _add(parser, "--ood_method", default="vim", choices=["msp", "vim", "gradnorm"], help="Detector for open-set evaluation")
         _add(parser, "--ood_tpr", type=float, default=0.95)
         _add(parser, "--ood_max_per_class", type=int, default=500)

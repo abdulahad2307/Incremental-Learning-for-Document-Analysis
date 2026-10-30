@@ -66,7 +66,8 @@ def train_one_epoch_evm_ood(
     lambda_evm=0.1,
     lambda_ood=0.1,
     old_model=None,
-    ewc=None
+    ewc=None,
+    ood_energy_grad=False
 ):
     model.train()
     total_loss = 0
@@ -123,7 +124,7 @@ def train_one_epoch_evm_ood(
         if evm_loss is not None:
             extra_loss = lambda_evm * evm_loss
         # L_OOD (ViM virtual-logit penalty) over samples of classes the ViM was fitted on
-        ood_loss = vim_ood_loss(ood_vim, features, logits, labels, class_names=class_names)
+        ood_loss = vim_ood_loss(ood_vim, features, logits, labels, class_names=class_names, energy_grad=ood_energy_grad)
         if ood_loss is not None:
             extra_loss = extra_loss + lambda_ood * ood_loss
 
@@ -186,6 +187,7 @@ def run_incremental_learning_evm_ood(
     use_bias_correction: bool = True,
     lambda_evm: float = 0.1,
     lambda_ood: float = 0.1,
+    ood_energy_grad: bool = False,
     ood_method: str = "msp",
     ood_tpr: float = 0.95,
     ood_max_per_class: int = 500,
@@ -420,7 +422,8 @@ def run_incremental_learning_evm_ood(
             metrics = CILMetrics(current_classes)
             set_train_augmentation(train_loader, True)  # EAML paper augmentation, training only
             train_results = train_one_epoch_evm_ood(
-                model, train_loader, optimizer, criterion, DEVICE, metrics, inc_strategy, evm, ood_vim, lambda_evm, lambda_ood, old_model, ewc if use_ewc else None
+                model, train_loader, optimizer, criterion, DEVICE, metrics, inc_strategy, evm, ood_vim, lambda_evm, lambda_ood, old_model, ewc if use_ewc else None,
+                ood_energy_grad=ood_energy_grad
             )
             set_train_augmentation(train_loader, False)
 
@@ -683,6 +686,8 @@ if __name__ == "__main__":
     p.add_argument('--use_bias_correction', action='store_true')
     p.add_argument('--lambda_evm', type=float, default=0.1)
     p.add_argument('--lambda_ood', type=float, default=0.1)
+    p.add_argument('--ood_energy_grad', action='store_true',
+                   help="L_OOD also through the logits' energy (original formulation; it inflates the classifier, ablation)")
 
     add_seed_arg(p)
     args = p.parse_args()
@@ -725,5 +730,6 @@ if __name__ == "__main__":
         use_balanced_sampler=args.use_balanced_sampler,
         use_bias_correction=args.use_bias_correction,
         lambda_evm=args.lambda_evm,
-        lambda_ood=args.lambda_ood
+        lambda_ood=args.lambda_ood,
+        ood_energy_grad=args.ood_energy_grad
     )

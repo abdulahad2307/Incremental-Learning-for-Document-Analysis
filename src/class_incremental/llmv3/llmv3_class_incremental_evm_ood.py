@@ -257,7 +257,8 @@ def main():
             if evm_term is not None:
                 loss = loss + args.lambda_evm * evm_term
             # L_OOD: ViM virtual-logit penalty on samples of classes the ViM was fitted on
-            ood_term = vim_ood_loss(ood_vim, feats, new_logits_raw, batch['labels'], class_names=label_space)
+            ood_term = vim_ood_loss(ood_vim, feats, new_logits_raw, batch['labels'], class_names=label_space,
+                                     energy_grad=args.ood_energy_grad)
             if ood_term is not None:
                 loss = loss + args.lambda_ood * ood_term
             if ewc:
