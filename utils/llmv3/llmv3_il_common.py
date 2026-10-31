@@ -10,6 +10,7 @@ from utils.llmv3.llmv3_incremental_utils import distillation_loss
 from utils.ievm.ievm import IncrementalEVM
 from utils.evm.evm_eval import evm_openset_metrics
 from utils.ood.ood_eval import collect_features_logits, subsample_loader
+from utils.ood.ood_loss import OOD_GRAD
 from utils import run_log
 from torch.utils.data import ConcatDataset, DataLoader, Subset, WeightedRandomSampler
 
@@ -42,8 +43,8 @@ def add_il_args(parser, strategy_default="standard", evm=False, ood=False, persi
              help="Save the EVM (and ViM) after the step and load it in the next job (default: in-memory only)")
     if ood:
         _add(parser, "--lambda_ood", type=float, default=0.1)
-        _add(parser, "--ood_energy_grad", action="store_true",
-             help="L_OOD also through the logits' energy (original formulation; it inflates the classifier, ablation)")
+        _add(parser, "--ood_grad", choices=OOD_GRAD, default="direction",
+             help="direction (default): L_OOD only turns features into the ViM subspace; radial: also shrinks them; full: also raises the logits' energy (original formulation, ablation)")
         _add(parser, "--ood_method", default="vim", choices=["msp", "vim", "gradnorm"], help="Detector for open-set evaluation")
         _add(parser, "--ood_tpr", type=float, default=0.95)
         _add(parser, "--ood_max_per_class", type=int, default=500)
