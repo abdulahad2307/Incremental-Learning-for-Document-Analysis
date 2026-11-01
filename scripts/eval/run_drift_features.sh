@@ -28,7 +28,7 @@ source "${SLURM_SUBMIT_DIR:-$PWD}/scripts/config.sh" || exit 1
 
 BACKBONE=${1:?usage: sbatch scripts/eval/run_drift_features.sh eaml|llmv3 <run, e.g. noevm_std>}
 RUN=${2:?usage: sbatch scripts/eval/run_drift_features.sh eaml|llmv3 <run, e.g. noevm_std>}
-METHOD=${RUN%_*}                                   # noevm | evm | evmood | ievm | regevm | finetune | joint
+METHOD=${RUN%%_*}                                  # noevm | evm | evmood | ievm | regevm | finetune | joint (also for e.g. evmood_std_energygrad)
 case "$BACKBONE" in
     eaml)  TAG=eaml; OCR=$EAML_OCR_RVL; BASE=$EAML_BASE_11; PATTERN="best_model_{class}.pth" ;;
     llmv3) TAG=$LLMV3_TAG; OCR=$LLMV3_OCR_RVL; BASE=$LLMV3_BASE_11
