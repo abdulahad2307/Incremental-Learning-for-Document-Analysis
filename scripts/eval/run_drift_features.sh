@@ -15,7 +15,8 @@
 # item 13), on the same documents at every step: 200 base training documents and 300 test documents of each of the
 # 16 classes. Step 0 is the base model (shared by all runs); steps whose checkpoint does not exist yet and files that
 # exist already are skipped, so the job can be resubmitted as the CIL run progresses.
-# Output: $RUN_ROOT/features/drift/<eaml|llmv3|llmv3hf>/step0.pt and .../<run>/step<k>.pt
+# Output: $RUN_ROOT/features/drift/<eaml|llmv3|llmv3hf>/step0.pt and .../<run>/step<k>.pt (seed 42), or
+# .../<run>/seed<N>/step<k>.pt for another seed (--export=SEED=N; step 0 is the shared base model either way)
 # Submit from the repo root (pre-trained LayoutLMv3: --export=LLMV3_MODEL=hf; any free GPU type via -p / --gres):
 #   sbatch scripts/eval/run_drift_features.sh eaml noevm_std
 #   sbatch --export=LLMV3_MODEL=hf scripts/eval/run_drift_features.sh llmv3 evm_std
@@ -39,7 +40,9 @@ case "$BACKBONE" in
     *) echo "ERROR: backbone must be eaml or llmv3" >&2; exit 1 ;;
 esac
 OUT=$RUN_ROOT/features/drift/$TAG
-mkdir -p "$OUT/$RUN"
+RUN_OUT=$OUT/$RUN
+if [ "$SEED" != 42 ]; then RUN_OUT=$RUN_OUT/seed$SEED; fi
+mkdir -p "$RUN_OUT"
 
 extract() {   # <checkpoint> <known classes> <output>
     [ -f "$3" ] && { echo "exists: $3"; return; }
@@ -56,6 +59,6 @@ for ((k = 1; k <= ${#CIL_ORDER[@]}; k++)); do
     KNOWN=$KNOWN,$NEW
     CKPT=$CIL_ROOT/$TAG/$RUN/seed$SEED/${PATTERN//\{class\}/$NEW}
     if [ ! -f "$CKPT" ]; then echo "step $k: no checkpoint yet ($CKPT)"; continue; fi
-    extract "$CKPT" "$KNOWN" "$OUT/$RUN/step$k.pt"
+    extract "$CKPT" "$KNOWN" "$RUN_OUT/step$k.pt"
 done
 echo "Finished: $OUT"
