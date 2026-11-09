@@ -30,6 +30,9 @@ def add_il_args(parser, strategy_default="standard", evm=False, ood=False, persi
          help="Images per previous class that exemplars are selected from (herding) and EWC is estimated on "
               "(EAML: 1000); --max_exemplars is the number kept per class")
     _add(parser, "--base_model_acc", type=float, default=None, help="Base model accuracy (fraction) for GIL w.r.t. the base model")
+    _add(parser, "--grad_checkpointing", action="store_true",
+         help="Recompute the HF LayoutLMv3 encoder activations in the backward pass (same results, less GPU memory; "
+              "for --training_mode full at batch 64 on a V100)")
     if cil:
         _add(parser, "--joint_training", action="store_true",
              help="Train on all training data of all seen classes (upper-bound baseline) instead of new class + exemplars")
@@ -48,6 +51,18 @@ def add_il_args(parser, strategy_default="standard", evm=False, ood=False, persi
         _add(parser, "--ood_method", default="vim", choices=["msp", "vim", "gradnorm"], help="Detector for open-set evaluation")
         _add(parser, "--ood_tpr", type=float, default=0.95)
         _add(parser, "--ood_max_per_class", type=int, default=500)
+
+
+def enable_grad_checkpointing(model, on):
+    """Gradient checkpointing of the HF LayoutLMv3 encoder; the custom LayoutLMv3 has none."""
+    if not on:
+        return
+    backbone = getattr(model, "backbone", None)
+    if backbone is None or not hasattr(backbone, "gradient_checkpointing_enable"):
+        print("WARNING: --grad_checkpointing is only available for the HF LayoutLMv3; ignored")
+        return
+    backbone.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+    print("Gradient checkpointing enabled for the LayoutLMv3 encoder")
 
 
 def make_teacher(base_model, strategy):

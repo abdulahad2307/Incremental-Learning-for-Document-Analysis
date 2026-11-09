@@ -7,7 +7,7 @@ import gc
 from torch.utils.data import DataLoader, ConcatDataset
 from utils.seed import add_seed_arg, set_seed
 from utils.llmv3.llmv3_model_loader import load_llmv3_checkpoint
-from utils.llmv3.llmv3_il_common import build_cil_train_loader, add_il_args, make_teacher, distill_term, center_classifier_bias, gil as gil_ratio, fit_evm, evm_open_set_eval
+from utils.llmv3.llmv3_il_common import enable_grad_checkpointing, build_cil_train_loader, add_il_args, make_teacher, distill_term, center_classifier_bias, gil as gil_ratio, fit_evm, evm_open_set_eval
 from utils import run_log
 from utils.eval.predictions import save_predictions
 from utils.evm.evm_loss import evm_nll_loss
@@ -100,6 +100,7 @@ def main():
         load_open_set_state(args.base_model_path, evm=evm)
 
     set_training_scope(model, args.training_mode)
+    enable_grad_checkpointing(model, args.grad_checkpointing)
 
 
     print("Loading base train data for exemplar selection .....")

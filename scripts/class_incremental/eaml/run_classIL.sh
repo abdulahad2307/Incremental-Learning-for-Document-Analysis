@@ -23,7 +23,7 @@ conda activate mtil
 source "${SLURM_SUBMIT_DIR:-$PWD}/scripts/config.sh" || exit 1
 
 STEP=${SLURM_ARRAY_TASK_ID:?submit with: sbatch --array=<step> <script>}
-CKPT_DIR=$CIL_ROOT/eaml/noevm_std/seed$SEED
+CKPT_DIR=$CIL_ROOT/eaml/noevm_std$SCOPE_TAG/seed$SEED
 cil_step "$STEP" "$CKPT_DIR" "$EAML_BASE_11" "best_model_{class}.pth"
 RESUME_CKPT=""                           # resume this step: "$CKPT_DIR/epoch<N>_$UNSEEN_CLASSES.pth"
 mkdir -p "$CKPT_DIR"
@@ -51,7 +51,7 @@ python src/class_incremental/eaml/class_incremental.py \
   --use_balanced_sampler \
   --max_exemplars 320 \
   --exemplar_selection herding \
-  --training_mode last_layer \
+  --training_mode "$TRAINING_MODE" \
   --full_model_acc "$EAML_BASE_11_ACC" \
   --patience 10 \
   ${RESUME_CKPT:+--resume --resume_checkpoint "$RESUME_CKPT"}

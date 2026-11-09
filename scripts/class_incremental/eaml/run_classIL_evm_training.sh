@@ -23,7 +23,7 @@ conda activate mtil
 source "${SLURM_SUBMIT_DIR:-$PWD}/scripts/config.sh" || exit 1
 
 STEP=${SLURM_ARRAY_TASK_ID:?submit with: sbatch --array=<step> <script>}
-CKPT_DIR=$CIL_ROOT/eaml/evm_std/seed$SEED
+CKPT_DIR=$CIL_ROOT/eaml/evm_std$SCOPE_TAG/seed$SEED
 cil_step "$STEP" "$CKPT_DIR" "$EAML_BASE_11" "best_model_{class}.pth"
 RESUME_CKPT=""                           # resume this step: "$CKPT_DIR/epoch<N>_$UNSEEN_CLASSES.pth"
 mkdir -p "$CKPT_DIR"
@@ -50,7 +50,7 @@ python src/class_incremental/eaml/class_incremental_evm_training.py \
   --use_bias_correction \
   --max_exemplars 320 \
   --exemplar_selection herding \
-  --training_mode last_layer \
+  --training_mode "$TRAINING_MODE" \
   --base_model_path "$BASE_MODEL" \
   --evm_tailsize 0.3 \
   --evm_threshold 0.7 \

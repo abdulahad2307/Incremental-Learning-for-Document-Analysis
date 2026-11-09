@@ -25,7 +25,7 @@ source "${SLURM_SUBMIT_DIR:-$PWD}/scripts/config.sh" || exit 1
 STEP=${SLURM_ARRAY_TASK_ID:?submit with: sbatch --array=<step> <script>}
 STRATEGY=${1:-standard}                  # standard | distillation (KD keeps a teacher copy in GPU memory)
 case "$STRATEGY" in standard) STRAT_TAG=std ;; distillation) STRAT_TAG=kd ;; *) echo "ERROR: strategy must be standard|distillation" >&2; exit 1 ;; esac
-CKPT_DIR=$CIL_ROOT/$LLMV3_TAG/evm_$STRAT_TAG/seed$SEED
+CKPT_DIR=$CIL_ROOT/$LLMV3_TAG/evm_$STRAT_TAG$SCOPE_TAG/seed$SEED
 cil_step "$STEP" "$CKPT_DIR" "$LLMV3_BASE_11" "layoutlmv3_cil_incremental_evm_{class}_best.pt"
 RESUME_CKPT=""                           # resume this step: a checkpoint of this step in $CKPT_DIR
 mkdir -p "$CKPT_DIR"
@@ -49,7 +49,8 @@ python src/class_incremental/llmv3/llmv3_class_incremental_evm_training.py \
   --use_balanced_sampler \
   --max_exemplars 20 \
   --exemplar_selection herding \
-  --training_mode last_layer \
+  --training_mode "$TRAINING_MODE" \
+  ${SCOPE_TAG:+--grad_checkpointing} \
   --evm_tailsize 0.3 \
   --base_model_acc "$LLMV3_BASE_11_ACC" \
   --full_model_acc "$LLMV3_BASE_11_ACC" \
