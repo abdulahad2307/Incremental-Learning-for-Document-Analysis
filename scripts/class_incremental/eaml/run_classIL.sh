@@ -56,4 +56,6 @@ python src/class_incremental/eaml/class_incremental.py \
   --patience 10 \
   ${RESUME_CKPT:+--resume --resume_checkpoint "$RESUME_CKPT"}
 
+STATUS=$?
+if [ $STATUS -ne 0 ]; then echo "FAILED (exit $STATUS); later steps submitted with afterok will not start" >&2; exit $STATUS; fi
 echo "Finished. Checkpoints: $CKPT_DIR"

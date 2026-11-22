@@ -55,4 +55,6 @@ python src/class_incremental/llmv3/llmv3_class_incremental.py \
   --full_model_acc "$LLMV3_BASE_11_ACC" \
   ${RESUME_CKPT:+--resume --resume_checkpoint "$RESUME_CKPT"}
 
+STATUS=$?
+if [ $STATUS -ne 0 ]; then echo "FAILED (exit $STATUS); later steps submitted with afterok will not start" >&2; exit $STATUS; fi
 echo "Finished. Checkpoints: $CKPT_DIR"

@@ -57,11 +57,16 @@ def enable_grad_checkpointing(model, on):
     """Gradient checkpointing of the HF LayoutLMv3 encoder; the custom LayoutLMv3 has none."""
     if not on:
         return
-    backbone = getattr(model, "backbone", None)
-    if backbone is None or not hasattr(backbone, "gradient_checkpointing_enable"):
+    encoder = getattr(getattr(model, "backbone", None), "encoder", None)
+    if encoder is None or not hasattr(encoder, "gradient_checkpointing"):
         print("WARNING: --grad_checkpointing is only available for the HF LayoutLMv3; ignored")
         return
-    backbone.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+    # LayoutLMv3Model sets supports_gradient_checkpointing = False, so gradient_checkpointing_enable() refuses, but
+    # its encoder loop has the checkpointing branch; switch it on as gradient_checkpointing_enable() would.
+    import functools
+    from torch.utils.checkpoint import checkpoint
+    encoder._gradient_checkpointing_func = functools.partial(checkpoint, use_reentrant=False)
+    encoder.gradient_checkpointing = True
     print("Gradient checkpointing enabled for the LayoutLMv3 encoder")
 
 
