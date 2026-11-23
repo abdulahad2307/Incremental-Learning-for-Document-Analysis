@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader, ConcatDataset
 from torch.utils.data.dataloader import default_collate
 from utils.seed import add_seed_arg, set_seed
 from utils.llmv3.llmv3_model_loader import load_llmv3_checkpoint
-from utils.llmv3.llmv3_il_common import build_cil_train_loader, add_il_args, make_teacher, distill_term, center_classifier_bias, gil as gil_ratio
+from utils.llmv3.llmv3_il_common import enable_grad_checkpointing, build_cil_train_loader, add_il_args, make_teacher, distill_term, center_classifier_bias, gil as gil_ratio
 from utils import run_log
 from utils.eval.predictions import save_predictions
 from utils.il_checks import warn_inactive_terms
@@ -132,6 +132,7 @@ def main():
     torch.cuda.empty_cache()
 
     set_training_scope(model, args.training_mode)
+    enable_grad_checkpointing(model, args.grad_checkpointing)
 
 
     print("Loading base train data for exemplar selection .....")

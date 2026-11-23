@@ -55,6 +55,14 @@ DIL_ROOT=$RUN_ROOT/dil                      # step 4: <backbone>/<method>_<strat
 # Repeat a run with another seed: sbatch --export=SEED=1 <script> ...   (with LLMV3_MODEL: --export=SEED=1,LLMV3_MODEL=hf)
 SEED=${SEED:-42}
 export IL_RESULTS_TABLE=$RUN_ROOT/il_runs.csv   # one table with every IL run (utils/run_log.py)
+# Parameters trained in the CIL steps (utils/training_scope.py): last_layer (default) or full.
+# Full-model runs: sbatch --export=TRAINING_MODE=full <cil script> ... -> folder <method>_<strategy>_full/, own table
+TRAINING_MODE=${TRAINING_MODE:-last_layer}
+case "$TRAINING_MODE" in
+    last_layer) SCOPE_TAG="" ;;
+    full) SCOPE_TAG="_full"; export IL_RESULTS_TABLE=$RUN_ROOT/il_runs_full.csv ;;
+    *) echo "ERROR: TRAINING_MODE must be last_layer or full, got '$TRAINING_MODE'" >&2; exit 1 ;;
+esac
 
 # Base checkpoints written by step 2 and read by steps 3-4
 EAML_BASE_11=$BASE_ROOT/eaml_11cls/eaml_best_model.pt

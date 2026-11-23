@@ -52,6 +52,14 @@ class EWC:
             self._means[n] = p.clone().detach()
 
         self.model.eval()
+        encoder = getattr(getattr(self.model, "backbone", None), "encoder", None)
+        if getattr(encoder, "gradient_checkpointing", False):
+            # HF checkpoints only in train mode: train mode with every dropout off gives the eval outputs
+            # (LayoutLMv3 has no batch norm) and keeps the full-model backward within GPU memory
+            self.model.train()
+            for m in self.model.modules():
+                if isinstance(m, torch.nn.Dropout):
+                    m.eval()
         count = 0
         for batch in self.dataloader:
             if count >= self.fisher_n:
