@@ -14,7 +14,8 @@
 # Per-modality features of one CIL checkpoint for the post-hoc EVT comparison (tools/eval/posthoc_evt.py, MEVM
 # go / no-go): <which> = base (11-class base model, step 0) or step1 (best model of step 1 of the No-EVM / standard
 # run, 12 classes) or base_all (base model, training features of all 16 classes, 1000 per class: frozen-backbone NCM
-# baseline, tools/eval/ncm_baseline.py). Output: $RUN_ROOT/features/<eaml|llmv3|llmv3hf>/<which>_cil.pt
+# baseline, tools/eval/ncm_baseline.py) or base_full (the same with all 12,500 training documents per class:
+# closed-form classifier, tools/eval/closed_form_classifier.py; needs --time=06:00:00). Output: $RUN_ROOT/features/<eaml|llmv3|llmv3hf>/<which>_cil.pt
 # Submit from the repo root:
 #   sbatch scripts/eval/run_extract_features.sh eaml base
 #   sbatch scripts/eval/run_extract_features.sh eaml step1
@@ -27,8 +28,8 @@ module load python/3.12-conda
 conda activate mtil
 source "${SLURM_SUBMIT_DIR:-$PWD}/scripts/config.sh" || exit 1
 
-BACKBONE=${1:?usage: sbatch scripts/eval/run_extract_features.sh eaml|llmv3 base|step1|base_all}
-WHICH=${2:?usage: sbatch scripts/eval/run_extract_features.sh eaml|llmv3 base|step1|base_all}
+BACKBONE=${1:?usage: sbatch scripts/eval/run_extract_features.sh eaml|llmv3 base|step1|base_all|base_full}
+WHICH=${2:?usage: sbatch scripts/eval/run_extract_features.sh eaml|llmv3 base|step1|base_all|base_full}
 EXTRA=()
 NEW1=${CIL_ORDER[0]}                       # class added in step 1
 case "$BACKBONE" in
@@ -42,7 +43,8 @@ case "$WHICH" in
     base)  CKPT=$BASE;  KNOWN=$CIL_BASE_CLASSES ;;
     step1) CKPT=$STEP1; KNOWN=$CIL_BASE_CLASSES,$NEW1 ;;
     base_all) CKPT=$BASE; KNOWN=$CIL_BASE_CLASSES; EXTRA=(--train_classes all --train_per_class 1000) ;;
-    *) echo "ERROR: which must be base, step1 or base_all" >&2; exit 1 ;;
+    base_full) CKPT=$BASE; KNOWN=$CIL_BASE_CLASSES; EXTRA=(--train_classes all --train_per_class 12500) ;;
+    *) echo "ERROR: which must be base, step1, base_all or base_full" >&2; exit 1 ;;
 esac
 require_file "$CKPT" "train the model / run CIL step 1 (No EVM, standard) first"
 
